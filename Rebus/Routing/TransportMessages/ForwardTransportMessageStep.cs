@@ -17,16 +17,23 @@ namespace Rebus.Routing.TransportMessages
     {
         readonly Func<TransportMessage, Task<ForwardAction>> _routingFunction;
         readonly ITransport _transport;
+        readonly string _errorQueueName;
+        readonly ErrorBehavior _errorBehavior;
         readonly ILog _log;
 
         /// <summary>
         /// Constructs the step
         /// </summary>
-        public ForwardTransportMessageStep(Func<TransportMessage, Task<ForwardAction>> routingFunction, ITransport transport, IRebusLoggerFactory rebusLoggerFactory)
+        public ForwardTransportMessageStep(Func<TransportMessage, Task<ForwardAction>> routingFunction, ITransport transport, IRebusLoggerFactory rebusLoggerFactory, string errorQueueName, ErrorBehavior errorBehavior)
         {
+            if (routingFunction == null) throw new ArgumentNullException(nameof(routingFunction));
+            if (transport == null) throw new ArgumentNullException(nameof(transport));
+            if (rebusLoggerFactory == null) throw new ArgumentNullException(nameof(rebusLoggerFactory));
             _routingFunction = routingFunction;
             _transport = transport;
-            _log = rebusLoggerFactory.GetCurrentClassLogger();
+            _errorQueueName = errorQueueName;
+            _errorBehavior = errorBehavior;
+            _log = rebusLoggerFactory.GetLogger<ForwardTransportMessageStep>();
         }
 
         /// <summary>
@@ -35,30 +42,60 @@ namespace Rebus.Routing.TransportMessages
         public async Task Process(IncomingStepContext context, Func<Task> next)
         {
             var transportMessage = context.Load<TransportMessage>();
-            var routingResult = (await _routingFunction(transportMessage)) ?? ForwardAction.None;
-            var actionType = routingResult.ActionType;
 
-            switch (actionType)
+            try
             {
-                case ActionType.Forward:
-                    var destinationAddresses = routingResult.DestinationAddresses;
-                    var transactionContext = context.Load<ITransactionContext>();
+                var routingResult = await _routingFunction(transportMessage) ?? ForwardAction.None;
+                var actionType = routingResult.ActionType;
 
-                    _log.Debug("Forwarding {0} to {1}", transportMessage.GetMessageLabel(), string.Join(", ", destinationAddresses));
+                switch (actionType)
+                {
+                    case ActionType.Forward:
+                        var destinationAddresses = routingResult.DestinationAddresses;
+                        var transactionContext = context.Load<ITransactionContext>();
 
-                    await Task.WhenAll(
-                        destinationAddresses
-                            .Select(address => _transport.Send(address, transportMessage, transactionContext))
+                        _log.Debug("Forwarding {messageLabel} to {queueNames}", transportMessage.GetMessageLabel(), destinationAddresses);
+
+                        await Task.WhenAll(
+                            destinationAddresses
+                                .Select(address => _transport.Send(address, transportMessage, transactionContext))
                         );
-                    break;
+                        break;
 
-                case ActionType.None:
-                    await next();
-                    break;
+                    case ActionType.None:
+                        await next();
+                        break;
 
-                default:
-                    await next();
-                    break;
+                    case ActionType.Ignore:
+                        _log.Debug("Ignoring {messageLabel}", transportMessage.GetMessageLabel());
+                        break;
+
+                    default:
+                        throw new ArgumentException($"Unknown forward action type: {actionType}");
+                }
+            }
+            catch (Exception e2)
+            {
+                if (_errorBehavior == ErrorBehavior.ForwardToErrorQueue)
+                {
+                    transportMessage.Headers[Headers.SourceQueue] = _transport.Address;
+                    transportMessage.Headers[Headers.ErrorDetails] = e2.ToString();
+
+                    try
+                    {
+                        var transactionContext = context.Load<ITransactionContext>();
+                        await _transport.Send(_errorQueueName, transportMessage, transactionContext);
+                        return;
+                    }
+                    catch (Exception exception)
+                    {
+                        _log.Error(exception, "Could not forward message {messageLabel} to {queueName} - waiting 5 s", transportMessage.GetMessageLabel(), _errorQueueName);
+                        await Task.Delay(TimeSpan.FromSeconds(5));
+                        context.Load<ITransactionContext>().Abort();
+                    }
+                }
+
+                throw;
             }
         }
     }

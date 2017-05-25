@@ -1,7 +1,8 @@
 ﻿using System;
+using System.Linq;
 using System.Threading.Tasks;
+using Rebus.Exceptions;
 using Rebus.Extensions;
-using Rebus.Logging;
 using Rebus.Messages;
 using Rebus.Pipeline;
 using Rebus.Transport;
@@ -23,22 +24,22 @@ If the maximum number of delivery attempts is reached, the message is moved to t
         /// </summary>
         public const string DispatchAsFailedMessageKey = "dispatch-as-failed-message";
 
-        static readonly TimeSpan MoveToErrorQueueFailedPause = TimeSpan.FromSeconds(5);
-
         readonly SimpleRetryStrategySettings _simpleRetryStrategySettings;
         readonly IErrorTracker _errorTracker;
-        readonly ITransport _transport;
-        readonly ILog _log;
+        readonly IErrorHandler _errorHandler;
 
         /// <summary>
         /// Constructs the step, using the given transport and settings
         /// </summary>
-        public SimpleRetryStrategyStep(ITransport transport, SimpleRetryStrategySettings simpleRetryStrategySettings, IErrorTracker errorTracker, IRebusLoggerFactory rebusLoggerFactory)
+        public SimpleRetryStrategyStep(SimpleRetryStrategySettings simpleRetryStrategySettings, IErrorTracker errorTracker, IErrorHandler errorHandler)
         {
-            _transport = transport;
+            if (simpleRetryStrategySettings == null) throw new ArgumentNullException(nameof(simpleRetryStrategySettings));
+            if (errorTracker == null) throw new ArgumentNullException(nameof(errorTracker));
+            if (errorHandler == null) throw new ArgumentNullException(nameof(errorHandler));
+
             _simpleRetryStrategySettings = simpleRetryStrategySettings;
             _errorTracker = errorTracker;
-            _log = rebusLoggerFactory.GetCurrentClassLogger();
+            _errorHandler = errorHandler;
         }
 
         /// <summary>
@@ -53,36 +54,33 @@ If the maximum number of delivery attempts is reached, the message is moved to t
 
             if (string.IsNullOrWhiteSpace(messageId))
             {
-                await MoveMessageToErrorQueue("<no message ID>",
-                    transportMessage,
-                    transactionContext,
-
-                    $"Received message with empty or absent '{Headers.MessageId}' header! All messages must be" +
-                    " supplied with an ID . If no ID is present, the message cannot be tracked" +
-                    " between delivery attempts, and other stuff would also be much harder to" +
-                    " do - therefore, it is a requirement that messages be supplied with an ID.");
+                await MoveMessageToErrorQueue(context.Load<OriginalTransportMessage>(), transactionContext,
+                    new RebusApplicationException($"Received message with empty or absent '{Headers.MessageId}' header! All messages must be" +
+                                                  " supplied with an ID . If no ID is present, the message cannot be tracked" +
+                                                  " between delivery attempts, and other stuff would also be much harder to" +
+                                                  " do - therefore, it is a requirement that messages be supplied with an ID."));
 
                 return;
             }
 
             if (_errorTracker.HasFailedTooManyTimes(messageId))
             {
-                var errorDescriptionFor = GetErrorDescriptionFor(messageId);
-
                 // if we don't have 2nd level retries, just get the message out of the way
                 if (!_simpleRetryStrategySettings.SecondLevelRetriesEnabled)
                 {
-                    await MoveMessageToErrorQueue(messageId, transportMessage, transactionContext, errorDescriptionFor);
+                    var aggregateException = GetAggregateException(messageId);
+                    await MoveMessageToErrorQueue(context.Load<OriginalTransportMessage>(), transactionContext, aggregateException);
                     _errorTracker.CleanUp(messageId);
                     return;
                 }
 
                 // change the identifier to track by to perform this 2nd level of delivery attempts
-                var secondLevelMessageId = messageId + "-2nd-level";
+                var secondLevelMessageId = GetSecondLevelMessageId(messageId);
 
                 if (_errorTracker.HasFailedTooManyTimes(secondLevelMessageId))
                 {
-                    await MoveMessageToErrorQueue(messageId, transportMessage, transactionContext, errorDescriptionFor);
+                    var aggregateException = GetAggregateException(messageId, secondLevelMessageId);
+                    await MoveMessageToErrorQueue(context.Load<OriginalTransportMessage>(), transactionContext, aggregateException);
                     _errorTracker.CleanUp(messageId);
                     _errorTracker.CleanUp(secondLevelMessageId);
                     return;
@@ -96,6 +94,18 @@ If the maximum number of delivery attempts is reached, the message is moved to t
             }
 
             await DispatchWithTrackerIdentifier(next, messageId, transactionContext, new[] { messageId });
+        }
+
+        AggregateException GetAggregateException(params string[] ids)
+        {
+            var exceptions = ids.SelectMany(_errorTracker.GetExceptions).ToArray();
+
+            return new AggregateException($"{exceptions.Length} unhandled exceptions", exceptions);
+        }
+
+        static string GetSecondLevelMessageId(string messageId)
+        {
+            return messageId + "-2nd-level";
         }
 
         async Task DispatchWithTrackerIdentifier(Func<Task> next, string identifierToTrackMessageBy, ITransactionContext transactionContext, string[] identifiersToClearOnSuccess)
@@ -119,36 +129,11 @@ If the maximum number of delivery attempts is reached, the message is moved to t
             }
         }
 
-        string GetErrorDescriptionFor(string messageId, bool brief = false)
+        async Task MoveMessageToErrorQueue(OriginalTransportMessage originalTransportMessage, ITransactionContext transactionContext, Exception exception)
         {
-            return brief
-                ? _errorTracker.GetShortErrorDescription(messageId)
-                : _errorTracker.GetFullErrorDescription(messageId);
-        }
+            var transportMessage = originalTransportMessage.TransportMessage;
 
-        async Task MoveMessageToErrorQueue(string messageId, TransportMessage transportMessage, ITransactionContext transactionContext, string errorDescription)
-        {
-            var headers = transportMessage.Headers;
-
-            headers[Headers.ErrorDetails] = errorDescription;
-            headers[Headers.SourceQueue] = _transport.Address;
-
-            var errorQueueAddress = _simpleRetryStrategySettings.ErrorQueueAddress;
-
-            try
-            {
-                _log.Error("Moving message with ID {0} to error queue '{1}' - reason: {2}", messageId, errorQueueAddress, errorDescription);
-
-                await _transport.Send(errorQueueAddress, transportMessage, transactionContext);
-            }
-            catch (Exception exception)
-            {
-                _log.Error(exception, "Could not move message with ID {0} to error queue '{1}' - will pause {2} to avoid thrashing",
-                    messageId, errorQueueAddress, MoveToErrorQueueFailedPause);
-
-                // if we can't move to error queue, we need to avoid thrashing over and over
-                await Task.Delay(MoveToErrorQueueFailedPause);
-            }
+            await _errorHandler.HandlePoisonMessage(transportMessage, transactionContext, exception);
         }
     }
 }

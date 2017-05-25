@@ -7,8 +7,12 @@ using NUnit.Framework;
 using Rebus.Activation;
 using Rebus.Bus;
 using Rebus.Config;
+using Rebus.Exceptions;
 using Rebus.Messages;
 using Rebus.Retry.Simple;
+using Rebus.Tests.Contracts;
+using Rebus.Tests.Contracts.Extensions;
+using Rebus.Tests.Contracts.Utilities;
 using Rebus.Transport.InMem;
 #pragma warning disable 1998
 
@@ -43,7 +47,7 @@ namespace Rebus.Tests.Integration
 
             _activator.Handle<BaseMessage>(async baseMessage =>
             {
-                throw new ApplicationException("1st level!!");
+                throw new RebusApplicationException("1st level!!");
             });
 
             _activator.Handle<IFailed<BaseMessage>>(async failed =>
@@ -75,7 +79,7 @@ namespace Rebus.Tests.Integration
 
             _activator.Handle<string>(async str =>
             {
-                throw new ApplicationException("1st level!!");
+                throw new RebusApplicationException("1st level!!");
             });
 
             _activator.Handle<IFailed<string>>(async failed =>
@@ -95,6 +99,34 @@ namespace Rebus.Tests.Integration
         }
 
         [Test]
+        public async Task IncludesFullErrorDetailsWhenSecondLevelRetriesFailToo()
+        {
+            var counter = new SharedCounter(1);
+
+            Using(counter);
+
+            _activator.Handle<string>(async str =>
+            {
+                throw new RebusApplicationException("1st level!!");
+            });
+
+            _activator.Handle<IFailed<string>>(async failed =>
+            {
+                throw new RebusApplicationException("2nd level!!");
+            });
+
+            await _bus.SendLocal("hej med dig!");
+
+            var transportMessage = await _network.WaitForNextMessageFrom("error");
+            var errorDetails = transportMessage.Headers[Headers.ErrorDetails];
+
+            Console.WriteLine(errorDetails);
+
+            Assert.That(errorDetails, Does.Contain("1st level!!"));
+            Assert.That(errorDetails, Does.Contain("2nd level!!"));
+        }
+
+        [Test]
         public async Task StillWorksWhenIncomingMessageCannotBeDeserialized()
         {
             const string brokenJsonString = @"{'broken': 'json', // DIE!!1}";
@@ -109,9 +141,7 @@ namespace Rebus.Tests.Integration
             var inMemTransportMessage = new InMemTransportMessage(transportMessage);
             _network.Deliver(InputQueueName, inMemTransportMessage);
 
-            await Task.Delay(1000);
-
-            var failedMessage = _network.GetNextOrNull("error");
+            var failedMessage = await _network.WaitForNextMessageFrom("error");
 
             Assert.That(failedMessage, Is.Not.Null);
             var bodyString = Encoding.UTF8.GetString(failedMessage.Body);
@@ -127,7 +157,7 @@ namespace Rebus.Tests.Integration
 
             _activator.Handle<string>(async str =>
             {
-                throw new ApplicationException("1st level!!");
+                throw new RebusApplicationException("1st level!!");
             });
 
             var headersOfFailedMessage = new Dictionary<string, string>();

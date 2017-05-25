@@ -1,6 +1,7 @@
-﻿using System;
-using System.IO;
+﻿using System.IO;
+using Rebus.Tests.Contracts;
 using Rebus.Tests.Contracts.Transports;
+using Rebus.Tests.Contracts.Utilities;
 using Rebus.Transport;
 using Rebus.Transport.FileSystem;
 
@@ -12,7 +13,7 @@ namespace Rebus.Tests.Transport.FileSystem
 
         public FileSystemTransportFactory()
         {
-            _baseDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "messages");
+            _baseDirectory = Path.Combine(TestConfig.DirectoryPath(), "messages");
 
             CleanUp();
         }
@@ -29,10 +30,7 @@ namespace Rebus.Tests.Transport.FileSystem
 
         public void CleanUp()
         {
-            if (Directory.Exists(_baseDirectory))
-            {
-                Directory.Delete(_baseDirectory, true);
-            }
+            DeleteHelper.DeleteDirectory(_baseDirectory);
         }
     }
 }

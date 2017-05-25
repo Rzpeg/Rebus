@@ -31,12 +31,11 @@ namespace Rebus.Testing
             {
                 try
                 {
-                    return Activator.CreateInstance<TSagaHandler>();
+                    return new TSagaHandler();
                 }
                 catch (Exception exception)
                 {
-                    throw new ArgumentException(
-                        $"Could not create new saga handler instance of type {typeof(TSagaHandler)}", exception);
+                    throw new ArgumentException($"Could not create new saga handler instance of type {typeof(TSagaHandler)}", exception);
                 }
             };
 
@@ -155,16 +154,18 @@ namespace Rebus.Testing
         /// <summary>
         /// Delivers the given message to the saga handler
         /// </summary>
-        public void Deliver(object message, Dictionary<string, string> optionalHeaders = null)
+        public void Deliver(object message, Dictionary<string, string> optionalHeaders = null, int deliveryTimeoutSeconds = 5)
         {
+            if (message == null) throw new ArgumentNullException(nameof(message));
+
             var resetEvent = new ManualResetEvent(false);
             _lockStepper.AddResetEvent(resetEvent);
 
-            _activator.Bus.SendLocal(message, optionalHeaders).Wait();
+            _activator.Bus.SendLocal(message, optionalHeaders);
 
-            if (!resetEvent.WaitOne(TimeSpan.FromSeconds(5)))
+            if (!resetEvent.WaitOne(TimeSpan.FromSeconds(deliveryTimeoutSeconds)))
             {
-                throw new TimeoutException($"Message {message} did not seem to have been processed withing 5 s timeout");
+                throw new TimeoutException($"Message {message} did not seem to have been processed withing {deliveryTimeoutSeconds} s timeout");
             }
         }
 
@@ -174,10 +175,7 @@ namespace Rebus.Testing
         /// </summary>
         public void Add(ISagaData sagaDataInstance)
         {
-            if (sagaDataInstance.Id == Guid.Empty)
-            {
-                _inMemorySagaStorage.AddInstance(sagaDataInstance);
-            }
+            _inMemorySagaStorage.AddInstance(sagaDataInstance);
         }
 
         /// <summary>

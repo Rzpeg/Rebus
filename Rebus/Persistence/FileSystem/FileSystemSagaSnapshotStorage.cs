@@ -28,7 +28,7 @@ namespace Rebus.Persistence.FileSystem
             if (rebusLoggerFactory == null) throw new ArgumentNullException(nameof(rebusLoggerFactory));
 
             _snapshotDirectory = snapshotDirectory;
-            _log = rebusLoggerFactory.GetCurrentClassLogger();
+            _log = rebusLoggerFactory.GetLogger<FileSystemSagaSnapshotStorage>();
         }
 
         /// <summary>
@@ -39,7 +39,7 @@ namespace Rebus.Persistence.FileSystem
         {
             if (Directory.Exists(_snapshotDirectory)) return;
 
-            _log.Info("Saga snapshot directory '{0}' does not exist - creating it!", _snapshotDirectory);
+            _log.Info("Saga snapshot directory {directoryPath} does not exist - creating it!", _snapshotDirectory);
 
             Directory.CreateDirectory(_snapshotDirectory);
 
@@ -51,8 +51,13 @@ namespace Rebus.Persistence.FileSystem
             }
             catch (Exception exception)
             {
+#if NET45
                 var message =
                     $"Could not write dummy file to saga snapshot directory '{_snapshotDirectory}' - is it writable for the {Environment.UserDomainName} / {Environment.UserName} account?";
+#elif NETSTANDARD1_6
+                var message =
+                    $"Could not write dummy file to saga snapshot directory '{_snapshotDirectory}' - is it writable for the current user account?";
+#endif
 
                 throw new IOException(message, exception);
             }

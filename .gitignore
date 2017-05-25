@@ -16,13 +16,19 @@ _ReSharper.*
 *.suo
 *.cache
 ~$*
-asb_connection_string.txt
-sqs_connectionstring.txt
-azure_storage_connection_string.txt
 .vs
 .vs/*
 _NCrunch_*
 *.user
 *.backup
-!packages
-!packages/*
+*.orig
+*.swp
+*.swo
+
+# MS Guideline
+**/packages/*
+!**/packages/build/
+AssemblyInfo_Patch.cs
+
+# JetBrains Rider
+.idea/

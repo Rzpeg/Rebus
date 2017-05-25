@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using Rebus.Bus;
 using Rebus.Exceptions;
+using Rebus.Logging;
 using Rebus.Messages;
 
 namespace Rebus.Pipeline.Receive
@@ -18,6 +20,17 @@ Please note that each invoker might choose to ignore the invocation internally.
 If no invokers were found, a RebusApplicationException is thrown.")]
     public class DispatchIncomingMessageStep : IIncomingStep
     {
+        readonly ILog _log;
+
+        /// <summary>
+        /// Creates the step
+        /// </summary>
+        public DispatchIncomingMessageStep(IRebusLoggerFactory rebusLoggerFactory)
+        {
+            if (rebusLoggerFactory == null) throw new ArgumentNullException(nameof(rebusLoggerFactory));
+            _log = rebusLoggerFactory.GetLogger<DispatchIncomingMessageStep>();
+        }
+
         /// <summary>
         /// Keys of an <see cref="IncomingStepContext"/> items that indicates that message dispatch must be stopped
         /// </summary>
@@ -29,27 +42,35 @@ If no invokers were found, a RebusApplicationException is thrown.")]
         public async Task Process(IncomingStepContext context, Func<Task> next)
         {
             var invokers = context.Load<HandlerInvokers>();
-            var didInvokeHandler = false;
+            var handlersInvoked = 0;
+            var messageLabel = invokers.Message.GetMessageLabel();
 
             // if dispatch has already been aborted (e.g. in a transport message filter or something else that
             // was run before us....) bail out here:
             if (context.Load<bool>(AbortDispatchContextKey))
             {
+                _log.Debug("Skipping dispatch of message {messageLabel}", messageLabel);
                 await next();
                 return;
             }
 
+            var stopwatch = Stopwatch.StartNew();
+
             foreach (var invoker in invokers)
             {
                 await invoker.Invoke();
-                didInvokeHandler = true;
+                handlersInvoked++;
 
                 // if dispatch was aborted at this point, bail out
-                if (context.Load<bool>(AbortDispatchContextKey)) break;
+                if (context.Load<bool>(AbortDispatchContextKey))
+                {
+                    _log.Debug("Skipping further dispatch of message {messageLabel}", messageLabel);
+                    break;
+                }
             }
 
             // throw error if we should have executed a handler but we didn't
-            if (!didInvokeHandler)
+            if (handlersInvoked == 0)
             {
                 var message = context.Load<Message>();
                 
@@ -60,6 +81,9 @@ If no invokers were found, a RebusApplicationException is thrown.")]
 
                 throw new RebusApplicationException(text);
             }
+
+            _log.Debug("Dispatching message {messageLabel} to {count} handlers took {elapsedMs:0} ms", 
+                messageLabel, handlersInvoked, stopwatch.Elapsed.TotalMilliseconds);
 
             await next();
         }

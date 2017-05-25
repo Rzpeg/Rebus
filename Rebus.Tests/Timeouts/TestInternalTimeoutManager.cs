@@ -5,15 +5,18 @@ using System.Threading.Tasks;
 using NUnit.Framework;
 using Rebus.Activation;
 using Rebus.Config;
-using Rebus.Tests.Extensions;
-using Rebus.Transport.Msmq;
+using Rebus.Tests.Contracts;
+using Rebus.Tests.Contracts.Extensions;
+using Rebus.Transport.InMem;
+
+#pragma warning disable 1998
 
 namespace Rebus.Tests.Timeouts
 {
-    [TestFixture, Category(Categories.Msmq)]
+    [TestFixture]
     public class TestInternalTimeoutManager : FixtureBase
     {
-        readonly string _queueName = TestConfig.QueueName("timeouts");
+        readonly string _queueName = TestConfig.GetName("timeouts");
 
         [Test]
         public async Task WorksOutOfTheBoxWithInternalTimeoutManager()
@@ -25,7 +28,7 @@ namespace Rebus.Tests.Timeouts
                 activator.Handle<string>(async str => gotTheMessage.Set());
 
                 Configure.With(activator)
-                    .Transport(t => t.UseMsmq(_queueName))
+                    .Transport(t => t.UseInMemoryTransport(new InMemNetwork(), _queueName))
                     .Start();
 
                 var stopwatch = Stopwatch.StartNew();
@@ -38,11 +41,6 @@ namespace Rebus.Tests.Timeouts
                 Assert.That(stopwatch.Elapsed, Is.GreaterThan(TimeSpan.FromSeconds(5)),
                     "It must take more than 5 second to get the message back");
             }
-        }
-
-        protected override void TearDown()
-        {
-            MsmqUtil.Delete(_queueName);
         }
     }
 }

@@ -9,13 +9,10 @@ namespace Rebus.Routing.TransportMessages
     /// </summary>
     public class ForwardAction
     {
-        readonly List<string> _destinationAddresses;
-        readonly ActionType _actionType;
-
         ForwardAction(ActionType actionType, params string[] destinationAddresses)
         {
-            _destinationAddresses = destinationAddresses.ToList();
-            _actionType = actionType;
+            DestinationAddresses = destinationAddresses.ToList();
+            ActionType = actionType;
         }
 
         /// <summary>
@@ -33,14 +30,26 @@ namespace Rebus.Routing.TransportMessages
             return new ForwardAction(ActionType.Forward, destinationAddress);
         }
 
-        internal List<string> DestinationAddresses
+        /// <summary>
+        /// Gets an action that causes the message to be forwarded to the queues specified by <paramref name="destinationAddresses"/>
+        /// </summary>
+        public static ForwardAction ForwardTo(IEnumerable<string> destinationAddresses)
         {
-            get { return _destinationAddresses; }
+            if (destinationAddresses == null) throw new ArgumentNullException(nameof(destinationAddresses), "Cannot forward message to (NULL) - use ForwardAction.None if you don't intend to forward the message");
+
+            return new ForwardAction(ActionType.Forward, destinationAddresses.ToArray());
         }
 
-        internal ActionType ActionType
+        /// <summary>
+        /// Gets an action that causes the messge to be ignored. THIS WILL EFFECTIVELY LOSE THE MESSAGE
+        /// </summary>
+        public static ForwardAction Ignore()
         {
-            get { return _actionType; }
+            return new ForwardAction(ActionType.Ignore);
         }
+
+        internal List<string> DestinationAddresses { get; }
+
+        internal ActionType ActionType { get; }
     }
 }

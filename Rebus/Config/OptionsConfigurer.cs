@@ -112,10 +112,10 @@ namespace Rebus.Config
 Message pipelines
 ------------------------------------------------------------------------------
 Send pipeline:
-{0}
+{sendPipeline}
 
 Receive pipeline:
-{1}
+{receivePipeline}
 ------------------------------------------------------------------------------
 ", Format(sendPipeline, verbose), Format(receivePipeline, verbose));
 
@@ -152,6 +152,7 @@ Receive pipeline:
         static string GetDocsOrNull(IStep step)
         {
             var docsAttribute = step.GetType()
+                .GetTypeInfo()
                 .GetCustomAttributes()
                 .OfType<StepDocumentationAttribute>()
                 .FirstOrDefault();

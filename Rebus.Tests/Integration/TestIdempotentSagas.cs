@@ -13,7 +13,8 @@ using Rebus.Logging;
 using Rebus.Messages;
 using Rebus.Sagas;
 using Rebus.Sagas.Idempotent;
-using Rebus.Tests.Extensions;
+using Rebus.Tests.Contracts;
+using Rebus.Tests.Contracts.Extensions;
 using Rebus.Transport;
 using Rebus.Transport.InMem;
 #pragma warning disable 1998
@@ -262,9 +263,9 @@ namespace Rebus.Tests.Integration
                 await _innerTransport.Send(destinationAddress, message, context);
             }
 
-            public async Task<TransportMessage> Receive(ITransactionContext context, CancellationToken cancellationToken = default(CancellationToken))
+            public async Task<TransportMessage> Receive(ITransactionContext context, CancellationToken cancellationToken)
             {
-                var transportMessage = await _innerTransport.Receive(context);
+                var transportMessage = await _innerTransport.Receive(context, cancellationToken);
                 if (transportMessage == null) return null;
 
                 var shouldFailThisTime = Interlocked.Increment(ref _failCounter) % _failFactor == 0;

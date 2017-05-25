@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,8 +8,10 @@ using Rebus.Auditing.Messages;
 using Rebus.Bus;
 using Rebus.Config;
 using Rebus.Messages;
-using Rebus.Tests.Extensions;
+using Rebus.Tests.Contracts;
+using Rebus.Tests.Contracts.Extensions;
 using Rebus.Transport.InMem;
+#pragma warning disable 1998
 
 namespace Rebus.Tests.Auditing
 {
@@ -42,10 +43,7 @@ namespace Rebus.Tests.Auditing
         [Test]
         public async Task DoesNotCopyFailedMessage()
         {
-            _adapter.Handle<string>(async _ =>
-            {
-                throw new Exception("w00t!!");
-            });
+            _adapter.Handle<string>(async _ => throw new Exception("w00t!!"));
 
             await _bus.SendLocal("woohooo!!!!");
 
@@ -70,18 +68,7 @@ namespace Rebus.Tests.Auditing
 
             gotTheMessage.WaitOrDie(TimeSpan.FromSeconds(5));
 
-            InMemTransportMessage message;
-            var timer = Stopwatch.StartNew();
-
-            while ((message = _network.GetNextOrNull("audit")) == null)
-            {
-                await Task.Delay(200);
-
-                if (timer.Elapsed > TimeSpan.FromSeconds(2))
-                {
-                    Assert.Fail("Did not receive message copy within 2 seconds of waiting....");
-                }
-            }
+            var message = await _network.WaitForNextMessageFrom("audit");
 
             PrintHeaders(message);
 
@@ -96,18 +83,7 @@ namespace Rebus.Tests.Auditing
         {
             await _bus.Advanced.Topics.Publish("TOPIC: 'whocares/nosubscribers'", "woohooo!!!!");
 
-            InMemTransportMessage message;
-            var timer = Stopwatch.StartNew();
-
-            while ((message = _network.GetNextOrNull("audit")) == null)
-            {
-                await Task.Delay(200);
-
-                if (timer.Elapsed > TimeSpan.FromSeconds(2))
-                {
-                    Assert.Fail("Did not receive message copy within 2 seconds of waiting....");
-                }
-            }
+            var message = await _network.WaitForNextMessageFrom("audit");
 
             PrintHeaders(message);
 
@@ -116,7 +92,7 @@ namespace Rebus.Tests.Auditing
             Assert.That(message.Headers[Headers.Intent], Is.EqualTo(Headers.IntentOptions.PublishSubscribe));
         }
 
-        static void PrintHeaders(InMemTransportMessage message)
+        static void PrintHeaders(TransportMessage message)
         {
             Console.WriteLine(@"Headers:
 {0}", string.Join(Environment.NewLine, message.Headers.Select(kvp => $"    {kvp.Key}: {kvp.Value}")));

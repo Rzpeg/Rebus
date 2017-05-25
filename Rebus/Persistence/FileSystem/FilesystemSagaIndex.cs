@@ -2,12 +2,13 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using Newtonsoft.Json;
 using Rebus.Sagas;
 
 namespace Rebus.Persistence.FileSystem
 {
-    class FilesystemSagaIndex
+    class FileSystemSagaIndex
     {
         readonly string _basePath;
 
@@ -16,7 +17,7 @@ namespace Rebus.Persistence.FileSystem
             TypeNameHandling = TypeNameHandling.All
         };
 
-        public FilesystemSagaIndex(string basePath)
+        public FileSystemSagaIndex(string basePath)
         {
             if (!Directory.Exists(basePath))
             {
@@ -117,7 +118,7 @@ namespace Rebus.Persistence.FileSystem
 
             foreach (var dot in dots)
             {
-                var propertyInfo = obj.GetType().GetProperty(dot);
+                var propertyInfo = obj.GetType().GetTypeInfo().GetProperty(dot);
                 if (propertyInfo == null) return null;
                 obj = propertyInfo.GetValue(obj, new object[0]);
                 if (obj == null) break;

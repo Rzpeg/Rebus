@@ -14,7 +14,7 @@ namespace Rebus.Persistence.FileSystem
     /// <summary>
     /// Implementation of <see cref="ITimeoutManager"/> that stores timeouts in the filesystem
     /// </summary>
-    public class FilesystemTimeoutManager : ITimeoutManager
+    public class FileSystemTimeoutManager : ITimeoutManager
     {
         static readonly string TickFormat;
 
@@ -22,7 +22,7 @@ namespace Rebus.Persistence.FileSystem
         readonly string _lockFile;
         readonly ILog _log;
 
-        static FilesystemTimeoutManager()
+        static FileSystemTimeoutManager()
         {
             var digitsInMaxInt = int.MaxValue.ToString().Length;
 
@@ -32,13 +32,13 @@ namespace Rebus.Persistence.FileSystem
         /// <summary>
         /// Creates the timeout manager, storing timeouts in the given <paramref name="basePath"/>
         /// </summary>
-        public FilesystemTimeoutManager(string basePath, IRebusLoggerFactory loggerFactory)
+        public FileSystemTimeoutManager(string basePath, IRebusLoggerFactory loggerFactory)
         {
             if (basePath == null) throw new ArgumentNullException(nameof(basePath));
             if (loggerFactory == null) throw new ArgumentNullException(nameof(loggerFactory));
             _basePath = basePath;
             _lockFile = Path.Combine(basePath, "lock.txt");
-            _log = loggerFactory.GetCurrentClassLogger();
+            _log = loggerFactory.GetLogger<FileSystemTimeoutManager>();
         }
 
         /// <summary>
@@ -46,7 +46,7 @@ namespace Rebus.Persistence.FileSystem
         /// </summary>
         public async Task Defer(DateTimeOffset approximateDueTime, Dictionary<string, string> headers, byte[] body)
         {
-            using (new FilesystemExclusiveLock(_lockFile, _log))
+            using (new FileSystemExclusiveLock(_lockFile, _log))
             {
                 var prefix = approximateDueTime.UtcDateTime.Ticks.ToString(TickFormat);
                 var count = Directory.EnumerateFiles(_basePath, prefix + "*.json").Count();
@@ -65,7 +65,7 @@ namespace Rebus.Persistence.FileSystem
         /// </summary>
         public async Task<DueMessagesResult> GetDueMessages()
         {
-            var lockItem = new FilesystemExclusiveLock(_lockFile, _log);
+            var lockItem = new FileSystemExclusiveLock(_lockFile, _log);
             var prefix = RebusTime.Now.UtcDateTime.Ticks.ToString(TickFormat);
             var enumerable = Directory.EnumerateFiles(_basePath, "*.json")
                 .Where(x => string.CompareOrdinal(prefix, 0, Path.GetFileNameWithoutExtension(x), 0, TickFormat.Length) >= 0)
@@ -77,7 +77,7 @@ namespace Rebus.Persistence.FileSystem
                     Timeout = JsonConvert.DeserializeObject<Timeout>(File.ReadAllText(f)),
                     File = f
                 })
-                .Select(a => new DueMessage(a.Timeout.Headers, a.Timeout.Body, () =>
+                .Select(a => new DueMessage(a.Timeout.Headers, a.Timeout.Body, async () =>
                 {
                     if (File.Exists(a.File))
                     {
@@ -86,7 +86,7 @@ namespace Rebus.Persistence.FileSystem
                 }))
                 .ToList();
 
-            return new DueMessagesResult(items, () => { lockItem.Dispose(); });
+            return new DueMessagesResult(items, async () => { lockItem.Dispose(); });
         }
 
         class Timeout

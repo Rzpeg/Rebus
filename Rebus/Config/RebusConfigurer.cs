@@ -1,31 +1,33 @@
 ﻿using System;
-using System.Configuration;
 using System.Linq;
 using Rebus.Activation;
-using Rebus.Backoff;
 using Rebus.Bus;
 using Rebus.DataBus;
+using Rebus.Exceptions;
 using Rebus.Handlers;
 using Rebus.Injection;
 using Rebus.Logging;
 using Rebus.Persistence.InMem;
 using Rebus.Pipeline;
+using Rebus.Pipeline.Invokers;
 using Rebus.Pipeline.Receive;
 using Rebus.Pipeline.Send;
 using Rebus.Retry;
 using Rebus.Retry.ErrorTracking;
+using Rebus.Retry.PoisonQueues;
 using Rebus.Retry.Simple;
 using Rebus.Routing;
 using Rebus.Routing.TypeBased;
 using Rebus.Sagas;
 using Rebus.Serialization;
+using Rebus.Serialization.Json;
 using Rebus.Subscriptions;
 using Rebus.Threading;
 using Rebus.Threading.TaskParallelLibrary;
 using Rebus.Timeouts;
 using Rebus.Transport;
 using Rebus.Workers;
-using Rebus.Workers.ThreadBased;
+using Rebus.Workers.ThreadPoolBased;
 
 namespace Rebus.Config
 {
@@ -41,6 +43,8 @@ namespace Rebus.Config
 
         internal RebusConfigurer(IHandlerActivator handlerActivator)
         {
+            if (handlerActivator == null) throw new ArgumentNullException(nameof(handlerActivator));
+
             _injectionist.Register(c => handlerActivator);
 
             if (handlerActivator is IContainerAdapter)
@@ -54,6 +58,7 @@ namespace Rebus.Config
         /// </summary>
         public RebusConfigurer Logging(Action<RebusLoggingConfigurer> configurer)
         {
+            if (configurer == null) throw new ArgumentNullException(nameof(configurer));
             configurer(new RebusLoggingConfigurer(_injectionist));
             return this;
         }
@@ -63,6 +68,7 @@ namespace Rebus.Config
         /// </summary>
         public RebusConfigurer Transport(Action<StandardConfigurer<ITransport>> configurer)
         {
+            if (configurer == null) throw new ArgumentNullException(nameof(configurer));
             configurer(new StandardConfigurer<ITransport>(_injectionist, _options));
             return this;
         }
@@ -72,6 +78,7 @@ namespace Rebus.Config
         /// </summary>
         public RebusConfigurer Routing(Action<StandardConfigurer<IRouter>> configurer)
         {
+            if (configurer == null) throw new ArgumentNullException(nameof(configurer));
             configurer(new StandardConfigurer<IRouter>(_injectionist, _options));
             return this;
         }
@@ -81,6 +88,7 @@ namespace Rebus.Config
         /// </summary>
         public RebusConfigurer Sagas(Action<StandardConfigurer<ISagaStorage>> configurer)
         {
+            if (configurer == null) throw new ArgumentNullException(nameof(configurer));
             configurer(new StandardConfigurer<ISagaStorage>(_injectionist, _options));
             return this;
         }
@@ -90,6 +98,7 @@ namespace Rebus.Config
         /// </summary>
         public RebusConfigurer Subscriptions(Action<StandardConfigurer<ISubscriptionStorage>> configurer)
         {
+            if (configurer == null) throw new ArgumentNullException(nameof(configurer));
             configurer(new StandardConfigurer<ISubscriptionStorage>(_injectionist, _options));
             return this;
         }
@@ -99,6 +108,7 @@ namespace Rebus.Config
         /// </summary>
         public RebusConfigurer Serialization(Action<StandardConfigurer<ISerializer>> configurer)
         {
+            if (configurer == null) throw new ArgumentNullException(nameof(configurer));
             configurer(new StandardConfigurer<ISerializer>(_injectionist, _options));
             return this;
         }
@@ -108,6 +118,7 @@ namespace Rebus.Config
         /// </summary>
         public RebusConfigurer Timeouts(Action<StandardConfigurer<ITimeoutManager>> configurer)
         {
+            if (configurer == null) throw new ArgumentNullException(nameof(configurer));
             configurer(new StandardConfigurer<ITimeoutManager>(_injectionist, _options));
             return this;
         }
@@ -117,6 +128,7 @@ namespace Rebus.Config
         /// </summary>
         public RebusConfigurer Options(Action<OptionsConfigurer> configurer)
         {
+            if (configurer == null) throw new ArgumentNullException(nameof(configurer));
             configurer(new OptionsConfigurer(_options, _injectionist));
             return this;
         }
@@ -132,10 +144,16 @@ namespace Rebus.Config
         {
             VerifyRequirements();
 
+            _injectionist.Register(c => _options);
+
             PossiblyRegisterDefault<IRebusLoggerFactory>(c => new ConsoleLoggerFactory(true));
 
             //PossiblyRegisterDefault<IAsyncTaskFactory>(c => new TimerAsyncTaskFactory(c.Get<IRebusLoggerFactory>()));
-            PossiblyRegisterDefault<IAsyncTaskFactory>(c => new TplAsyncTaskFactory(c.Get<IRebusLoggerFactory>()));
+            PossiblyRegisterDefault<IAsyncTaskFactory>(c =>
+            {
+                var rebusLoggerFactory = c.Get<IRebusLoggerFactory>();
+                return new TplAsyncTaskFactory(rebusLoggerFactory);
+            });
 
             PossiblyRegisterDefault<IRouter>(c =>
             {
@@ -149,18 +167,36 @@ namespace Rebus.Config
 
             PossiblyRegisterDefault<ISerializer>(c => new JsonSerializer());
 
-            PossiblyRegisterDefault<IPipelineInvoker>(c => new DefaultPipelineInvoker());
+            PossiblyRegisterDefault<IPipelineInvoker>(c =>
+            {
+                var pipeline = c.Get<IPipeline>();
+                return new DefaultPipelineInvokerNew(pipeline);
+            });
 
-            PossiblyRegisterDefault<IBackoffStrategy>(c => new SimpleConstantPollingBackoffStrategy());
+            PossiblyRegisterDefault<ISyncBackoffStrategy>(c =>
+            {
+                var backoffTimes = new[]
+                {
+                    // 10 s
+                    Enumerable.Repeat(TimeSpan.FromMilliseconds(100), 10),
+
+                    // on and on
+                    Enumerable.Repeat(TimeSpan.FromMilliseconds(250), 1)
+                };
+
+                return new DefaultSyncBackoffStrategy(backoffTimes.SelectMany(e => e));
+            });
 
             PossiblyRegisterDefault<IWorkerFactory>(c =>
             {
                 var transport = c.Get<ITransport>();
+                var rebusLoggerFactory = c.Get<IRebusLoggerFactory>();
                 var pipeline = c.Get<IPipeline>();
                 var pipelineInvoker = c.Get<IPipelineInvoker>();
-                var backoffStrategy = c.Get<IBackoffStrategy>();
-                var rebusLoggerFactory = c.Get<IRebusLoggerFactory>();
-                return new ThreadWorkerFactory(transport, pipeline, pipelineInvoker, _options.MaxParallelism, backoffStrategy, rebusLoggerFactory, _options.WorkerShutdownTimeout);
+                var options = c.Get<Options>();
+                var busLifetimeEvents = c.Get<BusLifetimeEvents>();
+                var backoffStrategy = c.Get<ISyncBackoffStrategy>();
+                return new ThreadPoolWorkerFactory(transport, rebusLoggerFactory, pipeline, pipelineInvoker, options, c.Get<RebusBus>, busLifetimeEvents, backoffStrategy);
             });
 
             PossiblyRegisterDefault<IErrorTracker>(c =>
@@ -171,13 +207,20 @@ namespace Rebus.Config
                 return new InMemErrorTracker(settings.MaxDeliveryAttempts, rebusLoggerFactory, asyncTaskFactory);
             });
 
+            PossiblyRegisterDefault<IErrorHandler>(c =>
+            {
+                var settings = c.Get<SimpleRetryStrategySettings>();
+                var transport = c.Get<ITransport>();
+                var rebusLoggerFactory = c.Get<IRebusLoggerFactory>();
+                return new PoisonQueueErrorHandler(settings, transport, rebusLoggerFactory);
+            });
+
             PossiblyRegisterDefault<IRetryStrategy>(c =>
             {
-                var transport = c.Get<ITransport>();
                 var simpleRetryStrategySettings = c.Get<SimpleRetryStrategySettings>();
                 var errorTracker = c.Get<IErrorTracker>();
-                var rebusLoggerFactory = c.Get<IRebusLoggerFactory>();
-                return new SimpleRetryStrategy(transport, simpleRetryStrategySettings, errorTracker, rebusLoggerFactory);
+                var errorHandler = c.Get<IErrorHandler>();
+                return new SimpleRetryStrategy(simpleRetryStrategySettings, errorTracker, errorHandler);
             });
 
             PossiblyRegisterDefault(c => new SimpleRetryStrategySettings());
@@ -207,7 +250,7 @@ namespace Rebus.Config
                     .OnReceive(new DeserializeIncomingMessageStep(serializer))
                     .OnReceive(new ActivateHandlersStep(c.Get<IHandlerActivator>()))
                     .OnReceive(new LoadSagaDataStep(c.Get<ISagaStorage>(), rebusLoggerFactory))
-                    .OnReceive(new DispatchIncomingMessageStep())
+                    .OnReceive(new DispatchIncomingMessageStep(rebusLoggerFactory))
 
                     .OnSend(new AssignGuidMessageIdStep())
                     .OnSend(new AssignReturnAddressStep(transport))
@@ -229,19 +272,20 @@ namespace Rebus.Config
             // configuration hack - keep these two bad boys around to have them available at the last moment before returning the built bus instance...
             Action startAction = null;
 
+            PossiblyRegisterDefault(c => new RebusBus(
+                c.Get<IWorkerFactory>(),
+                c.Get<IRouter>(),
+                c.Get<ITransport>(),
+                c.Get<IPipelineInvoker>(),
+                c.Get<ISubscriptionStorage>(),
+                _options,
+                c.Get<IRebusLoggerFactory>(),
+                c.Get<BusLifetimeEvents>(),
+                c.Get<IDataBus>()));
+
             PossiblyRegisterDefault<IBus>(c =>
             {
-                var bus = new RebusBus(
-                    c.Get<IWorkerFactory>(),
-                    c.Get<IRouter>(),
-                    c.Get<ITransport>(),
-                    c.Get<IPipeline>(),
-                    c.Get<IPipelineInvoker>(),
-                    c.Get<ISubscriptionStorage>(),
-                    _options,
-                    c.Get<IRebusLoggerFactory>(),
-                    c.Get<BusLifetimeEvents>(),
-                    c.Get<IDataBus>());
+                var bus = c.Get<RebusBus>();
 
                 bus.Disposed += () =>
                 {
@@ -274,11 +318,11 @@ namespace Rebus.Config
                 return internalHandlersContributor;
             });
 
-            var butResolutionResult = _injectionist.Get<IBus>();
-            var busInstance = butResolutionResult.Instance;
+            var busResolutionResult = _injectionist.Get<IBus>();
+            var busInstance = busResolutionResult.Instance;
 
             // if there is a container adapter among the tracked instances, hand it the bus instance
-            var containerAdapter = butResolutionResult.TrackedInstances
+            var containerAdapter = busResolutionResult.TrackedInstances
                 .OfType<IContainerAdapter>()
                 .FirstOrDefault();
 
@@ -301,7 +345,7 @@ namespace Rebus.Config
 
             if (!_injectionist.Has<ITransport>())
             {
-                throw new ConfigurationErrorsException(
+                throw new Rebus.Exceptions.RebusConfigurationException(
                     "No transport has been configured! You need to call .Transport(t => t.Use***) in order" +
                     " to select which kind of queueing system you want to use to transport messages. If" +
                     " you want something lightweight (possibly for testing?) you can use .Transport(t => t.UseInMemoryTransport(...))");

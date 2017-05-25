@@ -7,9 +7,11 @@ using Rebus.Activation;
 using Rebus.Config;
 using Rebus.Handlers;
 using Rebus.Handlers.Reordering;
-using Rebus.Tests.Extensions;
+using Rebus.Tests.Contracts;
+using Rebus.Tests.Contracts.Extensions;
 using Rebus.Transport;
 using Rebus.Transport.InMem;
+#pragma warning disable 1998
 
 namespace Rebus.Tests.Integration
 {

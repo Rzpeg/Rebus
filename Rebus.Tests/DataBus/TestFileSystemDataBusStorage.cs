@@ -8,7 +8,9 @@ using System.Threading.Tasks;
 using NUnit.Framework;
 using Rebus.DataBus.FileSystem;
 using Rebus.Logging;
-using Rebus.Tests.Extensions;
+using Rebus.Tests.Contracts;
+using Rebus.Tests.Contracts.Extensions;
+using Rebus.Tests.Contracts.Utilities;
 
 namespace Rebus.Tests.DataBus
 {
@@ -19,12 +21,9 @@ namespace Rebus.Tests.DataBus
 
         protected override void SetUp()
         {
-            var directoryPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "databustest");
+            var directoryPath = Path.Combine(TestConfig.DirectoryPath(), "databustest");
 
-            if (Directory.Exists(directoryPath))
-            {
-                Directory.Delete(directoryPath, true);
-            }
+            DeleteHelper.DeleteDirectory(directoryPath);
 
             _storage = new FileSystemDataBusStorage(directoryPath, new ConsoleLoggerFactory(false));
             _storage.Initialize();

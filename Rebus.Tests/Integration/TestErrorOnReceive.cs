@@ -5,8 +5,11 @@ using System.Threading.Tasks;
 using NUnit.Framework;
 using Rebus.Activation;
 using Rebus.Config;
+using Rebus.Exceptions;
 using Rebus.Logging;
 using Rebus.Messages;
+using Rebus.Tests.Contracts;
+using Rebus.Tests.Contracts.Utilities;
 using Rebus.Transport;
 using Rebus.Transport.InMem;
 
@@ -86,14 +89,14 @@ namespace Rebus.Tests.Integration
 
             public bool Fail { get; set; }
 
-            public Task<TransportMessage> Receive(ITransactionContext context, CancellationToken cancellationToken = default(CancellationToken))
+            public Task<TransportMessage> Receive(ITransactionContext context, CancellationToken cancellationToken)
             {
                 if (Fail)
                 {
-                    throw new ApplicationException("THIS IS A FAKE ERROR CAUSED BY HAVING THE FAIL TOGGLE = TRUE");
+                    throw new RebusApplicationException("THIS IS A FAKE ERROR CAUSED BY HAVING THE FAIL TOGGLE = TRUE");
                 }
 
-                return _transport.Receive(context);
+                return _transport.Receive(context, cancellationToken);
             }
         }
     }

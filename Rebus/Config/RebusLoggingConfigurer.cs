@@ -1,3 +1,4 @@
+using System;
 using Rebus.Injection;
 using Rebus.Logging;
 
@@ -13,6 +14,7 @@ namespace Rebus.Config
 
         internal RebusLoggingConfigurer(Injectionist injectionist)
         {
+            if (injectionist == null) throw new ArgumentNullException(nameof(injectionist));
             _injectionist = injectionist;
         }
 
@@ -59,7 +61,24 @@ namespace Rebus.Config
         /// </summary>
         public void Use(IRebusLoggerFactory rebusLoggerFactory)
         {
-            _injectionist.Register(c => rebusLoggerFactory);
+            if (rebusLoggerFactory == null) throw new ArgumentNullException(nameof(rebusLoggerFactory));
+            _injectionist.Register(c => rebusLoggerFactory, $"This Rebus instance has been configured to use the {rebusLoggerFactory} logger factory");
+        }
+
+        /// <summary>
+        /// Registers the given factory function as a resolve of the given <typeparamref name="TService"/> service
+        /// </summary>
+        public void Register<TService>(Func<IResolutionContext, TService> factoryMethod, string description = null)
+        {
+            _injectionist.Register(factoryMethod, description: description);
+        }
+
+        /// <summary>
+        /// Registers the given factory function as a resolve of the given <typeparamref name="TService"/> service
+        /// </summary>
+        public void Decorate<TService>(Func<IResolutionContext, TService> factoryMethod, string description = null)
+        {
+            _injectionist.Decorate(factoryMethod, description: description);
         }
     }
 }

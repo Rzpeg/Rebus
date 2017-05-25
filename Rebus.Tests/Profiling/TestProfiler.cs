@@ -4,7 +4,9 @@ using System.Threading.Tasks;
 using NUnit.Framework;
 using Rebus.Messages;
 using Rebus.Pipeline;
+using Rebus.Pipeline.Invokers;
 using Rebus.Profiling;
+using Rebus.Tests.Contracts;
 using Rebus.Transport;
 
 namespace Rebus.Tests.Profiling
@@ -23,17 +25,19 @@ namespace Rebus.Tests.Profiling
 
             var profiler = new PipelineStepProfiler(pipeline, stats);
 
-            var receivePipeline = profiler.ReceivePipeline();
-            var invoker = new DefaultPipelineInvoker();
             var transportMessage = new TransportMessage(new Dictionary<string, string>(), new byte[0]);
-            var transactionContext = new DefaultTransactionContext();
-            var stepContext = new IncomingStepContext(transportMessage, transactionContext);
 
-            invoker.Invoke(stepContext, receivePipeline).Wait();
+            using (new RebusTransactionScope())
+            {
+                var stepContext = new IncomingStepContext(transportMessage, AmbientTransactionContext.Current);
+                var invoker = new DefaultPipelineInvoker(profiler);
 
-            var stepStats = stats.GetStats();
+                invoker.Invoke(stepContext).Wait();
 
-            Console.WriteLine(string.Join(Environment.NewLine, stepStats));
+                var stepStats = stats.GetStats();
+
+                Console.WriteLine(string.Join(Environment.NewLine, stepStats));
+            }
         }
 
         class Step100 : IIncomingStep

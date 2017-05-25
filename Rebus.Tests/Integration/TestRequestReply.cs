@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Messaging;
-using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -8,51 +6,33 @@ using Rebus.Activation;
 using Rebus.Bus;
 using Rebus.Config;
 using Rebus.Routing.TypeBased;
-using Rebus.Tests.Extensions;
-using Rebus.Transport.Msmq;
+using Rebus.Tests.Contracts;
+using Rebus.Tests.Contracts.Extensions;
+using Rebus.Transport.InMem;
 
 namespace Rebus.Tests.Integration
 {
-    [TestFixture, Category(Categories.Msmq)]
+    [TestFixture]
     public class TestRequestReply : FixtureBase
     {
-        static readonly string InputQueueName = TestConfig.QueueName("test.input");
-
         IBus _bus;
         BuiltinHandlerActivator _handlerActivator;
 
         protected override void SetUp()
         {
-            MsmqUtil.Delete(InputQueueName);
+            _handlerActivator = Using(new BuiltinHandlerActivator());
 
-            _handlerActivator = new BuiltinHandlerActivator();
+            const string queueName = "request-reply";
 
             _bus = Configure.With(_handlerActivator)
                 .Logging(l => l.Console())
                 .Transport(t =>
                 {
-                    t.UseMsmq(InputQueueName)
-                        .OnCreated(queue =>
-                        {
-                            queue.ResetPermissions();
-
-                            var user = new SecurityIdentifier(WellKnownSidType.WorldSid, null)
-                                .Translate(typeof(NTAccount))
-                                .ToString();
-
-                            queue.SetPermissions(user, MessageQueueAccessRights.FullControl);
-                        });
+                    t.UseInMemoryTransport(new InMemNetwork(), queueName);
                 })
-                .Routing(r => r.TypeBased().Map<string>(InputQueueName))
+                .Routing(r => r.TypeBased().Map<string>(queueName))
                 .Options(o => o.SetNumberOfWorkers(1))
                 .Start();
-
-            Using(_bus);
-        }
-
-        protected override void TearDown()
-        {
-            //MsmqUtil.Delete(InputQueueName);
         }
 
         [Test]

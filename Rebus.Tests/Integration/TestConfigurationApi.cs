@@ -1,13 +1,15 @@
 ﻿using System;
-using System.Configuration;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Rebus.Activation;
 using Rebus.Config;
+using Rebus.Exceptions;
 using Rebus.Messages;
 using Rebus.Subscriptions;
+using Rebus.Tests.Contracts;
 using Rebus.Transport;
+#pragma warning disable 1998
 
 namespace Rebus.Tests.Integration
 {
@@ -17,7 +19,7 @@ namespace Rebus.Tests.Integration
         [Test]
         public void ThrowsIfNoTransportIsSpecified()
         {
-            Assert.Throws<ConfigurationErrorsException>(() => Configure.With(new BuiltinHandlerActivator()).Start());
+            Assert.Throws<RebusConfigurationException>(() => Configure.With(new BuiltinHandlerActivator()).Start());
         }
 
         [Test]
@@ -77,7 +79,7 @@ namespace Rebus.Tests.Integration
             {
             }
 
-            public async Task<TransportMessage> Receive(ITransactionContext context, CancellationToken cancellationToken = default(CancellationToken))
+            public async Task<TransportMessage> Receive(ITransactionContext context, CancellationToken cancellationToken)
             {
                 return null;
             }

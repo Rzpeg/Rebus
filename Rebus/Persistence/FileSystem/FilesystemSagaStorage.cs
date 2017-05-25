@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Threading.Tasks;
 using Rebus.Exceptions;
 using Rebus.Logging;
@@ -12,7 +13,7 @@ namespace Rebus.Persistence.FileSystem
     /// <summary>
     /// Implementation of <see cref="ISagaStorage"/> that uses the file system to store data
     /// </summary>
-    public class FilesystemSagaStorage : ISagaStorage
+    public class FileSystemSagaStorage : ISagaStorage
     {
         const string IdPropertyName = nameof(ISagaData.Id);
         readonly string _basePath;
@@ -22,12 +23,12 @@ namespace Rebus.Persistence.FileSystem
         /// <summary>
         /// Creates the saga storage using the given <paramref name="basePath"/> 
         /// </summary>
-        public FilesystemSagaStorage(string basePath, IRebusLoggerFactory rebusLoggerFactory)
+        public FileSystemSagaStorage(string basePath, IRebusLoggerFactory rebusLoggerFactory)
         {
             if (basePath == null) throw new ArgumentNullException(nameof(basePath));
             if (rebusLoggerFactory == null) throw new ArgumentNullException(nameof(rebusLoggerFactory));
             _basePath = basePath;
-            _log = rebusLoggerFactory.GetCurrentClassLogger();
+            _log = rebusLoggerFactory.GetLogger<FileSystemSagaStorage>();
             _lockFile = Path.Combine(basePath, "lock.txt");
         }
 
@@ -36,12 +37,19 @@ namespace Rebus.Persistence.FileSystem
         /// </summary>
         public async Task<ISagaData> Find(Type sagaDataType, string propertyName, object propertyValue)
         {
-            using (new FilesystemExclusiveLock(_lockFile, _log))
+            using (new FileSystemExclusiveLock(_lockFile, _log))
             {
-                var index = new FilesystemSagaIndex(_basePath);
+                var index = new FileSystemSagaIndex(_basePath);
                 if (propertyName == IdPropertyName)
                 {
-                    return index.FindById((Guid) propertyValue);
+                    var sagaData = index.FindById((Guid) propertyValue);
+
+                    if (!sagaDataType.GetTypeInfo().IsInstanceOfType(sagaData))
+                    {
+                        return null;
+                    }
+
+                    return sagaData;
                 }
                 return index.Find(sagaDataType, propertyName, propertyValue);
             }
@@ -52,9 +60,9 @@ namespace Rebus.Persistence.FileSystem
         /// </summary>
         public async Task Insert(ISagaData sagaData, IEnumerable<ISagaCorrelationProperty> correlationProperties)
         {
-            using (new FilesystemExclusiveLock(_lockFile, _log))
+            using (new FileSystemExclusiveLock(_lockFile, _log))
             {
-                var index = new FilesystemSagaIndex(_basePath);
+                var index = new FileSystemSagaIndex(_basePath);
                 var id = GetId(sagaData);
                 if (sagaData.Revision != 0)
                 {
@@ -64,7 +72,7 @@ namespace Rebus.Persistence.FileSystem
                 var existingSaga = index.FindById(id);
                 if (existingSaga != null)
                 {
-                    throw new ConcurrencyException("Saga data with ID {0} already exists!", id);
+                    throw new ConcurrencyException($"Saga data with ID {id} already exists!");
                 }
                 index.Insert(sagaData, correlationProperties);
 
@@ -76,19 +84,18 @@ namespace Rebus.Persistence.FileSystem
         /// </summary>
         public async Task Update(ISagaData sagaData, IEnumerable<ISagaCorrelationProperty> correlationProperties)
         {
-            using (new FilesystemExclusiveLock(_lockFile, _log))
+            using (new FileSystemExclusiveLock(_lockFile, _log))
             {
-                var index = new FilesystemSagaIndex(_basePath);
+                var index = new FileSystemSagaIndex(_basePath);
                 var id = GetId(sagaData);
                 var existingCopy = index.FindById(id);
                 if (existingCopy == null)
                 {
-                    throw new ConcurrencyException("Saga data with ID {0} does not exist!", id);
+                    throw new ConcurrencyException($"Saga data with ID {id} does not exist!");
                 }
                 if (existingCopy.Revision != sagaData.Revision)
                 {
-                    throw new ConcurrencyException("Attempted to update saga data with ID {0} with revision {1}, but the existing data was updated to revision {2}",
-                        id, sagaData.Revision, existingCopy.Revision);
+                    throw new ConcurrencyException($"Attempted to update saga data with ID {id} with revision {sagaData.Revision}, but the existing data was updated to revision {existingCopy.Revision}");
                 }
                 sagaData.Revision++;
                 index.Insert(sagaData, correlationProperties);
@@ -100,13 +107,13 @@ namespace Rebus.Persistence.FileSystem
         /// </summary>
         public async Task Delete(ISagaData sagaData)
         {
-            using (new FilesystemExclusiveLock(_lockFile, _log))
+            using (new FileSystemExclusiveLock(_lockFile, _log))
             {
-                var index = new FilesystemSagaIndex(_basePath);
+                var index = new FileSystemSagaIndex(_basePath);
                 var id = sagaData.Id;
                 if (!index.Contains(id))
                 {
-                    throw new ConcurrencyException("Saga data with ID {0} no longer exists and cannot be deleted", id);
+                    throw new ConcurrencyException($"Saga data with ID {id} no longer exists and cannot be deleted");
                 }
                 index.Remove(id);
             }

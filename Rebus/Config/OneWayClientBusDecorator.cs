@@ -91,6 +91,8 @@ namespace Rebus.Config
             public ITransportMessageApi TransportMessage => _innerAdvancedApi.TransportMessage;
 
             public IDataBus DataBus => _innerAdvancedApi.DataBus;
+
+            public ISyncBus SyncBus => _innerAdvancedApi.SyncBus;
         }
 
         class OneWayClientWorkersApi : IWorkersApi
@@ -99,7 +101,7 @@ namespace Rebus.Config
 
             public OneWayClientWorkersApi(IRebusLoggerFactory rebusLoggerFactory)
             {
-                _log = rebusLoggerFactory.GetCurrentClassLogger();
+                _log = rebusLoggerFactory.GetLogger<OneWayClientWorkersApi>();
             }
 
             public int Count => 0;
@@ -108,7 +110,7 @@ namespace Rebus.Config
             {
                 if (numberOfWorkers <= 0) return;
 
-                _log.Warn("Attempted to set number of workers to {0}, but this is a one-way client!", numberOfWorkers);
+                _log.Warn("Attempted to set number of workers to {numberOfWorkers}, but this is a one-way client!", numberOfWorkers);
             }
         }
     }

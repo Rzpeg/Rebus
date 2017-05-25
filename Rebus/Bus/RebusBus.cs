@@ -37,7 +37,6 @@ namespace Rebus.Bus
         readonly IWorkerFactory _workerFactory;
         readonly IRouter _router;
         readonly ITransport _transport;
-        readonly IPipeline _pipeline;
         readonly IPipelineInvoker _pipelineInvoker;
         readonly ISubscriptionStorage _subscriptionStorage;
         readonly Options _options;
@@ -46,18 +45,17 @@ namespace Rebus.Bus
         /// <summary>
         /// Constructs the bus.
         /// </summary>
-        public RebusBus(IWorkerFactory workerFactory, IRouter router, ITransport transport, IPipeline pipeline, IPipelineInvoker pipelineInvoker, ISubscriptionStorage subscriptionStorage, Options options, IRebusLoggerFactory rebusLoggerFactory, BusLifetimeEvents busLifetimeEvents, IDataBus dataBus)
+        public RebusBus(IWorkerFactory workerFactory, IRouter router, ITransport transport, IPipelineInvoker pipelineInvoker, ISubscriptionStorage subscriptionStorage, Options options, IRebusLoggerFactory rebusLoggerFactory, BusLifetimeEvents busLifetimeEvents, IDataBus dataBus)
         {
             _workerFactory = workerFactory;
             _router = router;
             _transport = transport;
-            _pipeline = pipeline;
             _pipelineInvoker = pipelineInvoker;
             _subscriptionStorage = subscriptionStorage;
             _options = options;
             _busLifetimeEvents = busLifetimeEvents;
             _dataBus = dataBus;
-            _log = rebusLoggerFactory.GetCurrentClassLogger();
+            _log = rebusLoggerFactory.GetLogger<RebusBus>();
         }
 
         /// <summary>
@@ -65,9 +63,13 @@ namespace Rebus.Bus
         /// </summary>
         public void Start(int numberOfWorkers)
         {
-            _log.Info("Starting bus {0}", _busId);
+            _log.Info("Starting bus {busId}", _busId);
+
+            _busLifetimeEvents.RaiseBusStarting();
 
             SetNumberOfWorkers(numberOfWorkers);
+
+            _busLifetimeEvents.RaiseBusStarted();
 
             _log.Info("Started");
         }
@@ -108,7 +110,7 @@ namespace Rebus.Bus
         public async Task Defer(TimeSpan delay, object message, Dictionary<string, string> optionalHeaders = null)
         {
             var logicalMessage = CreateMessage(message, Operation.Defer, optionalHeaders);
-            
+
             logicalMessage.SetDeferHeaders(RebusTime.Now + delay, _transport.Address);
 
             var timeoutManagerAddress = GetTimeoutManagerAddress();
@@ -123,7 +125,7 @@ namespace Rebus.Bus
         public async Task Reply(object replyMessage, Dictionary<string, string> optionalHeaders = null)
         {
             // reply is slightly different from Send and Publish in that it REQUIRES a transaction context to be present
-            var currentTransactionContext = AmbientTransactionContext.Current;
+            var currentTransactionContext = GetCurrentTransactionContext(mustBelongToThisBus: true);
 
             if (currentTransactionContext == null)
             {
@@ -370,7 +372,7 @@ namespace Rebus.Bus
 
         async Task InnerSend(IEnumerable<string> destinationAddresses, Message logicalMessage)
         {
-            var currentTransactionContext = AmbientTransactionContext.Current;
+            var currentTransactionContext = GetCurrentTransactionContext(mustBelongToThisBus: true);
 
             if (currentTransactionContext != null)
             {
@@ -378,10 +380,9 @@ namespace Rebus.Bus
             }
             else
             {
-                using (var context = new DefaultTransactionContext())
+                using (var context = new TransactionContext())
                 {
                     await SendUsingTransactionContext(destinationAddresses, logicalMessage, context);
-
                     await context.Complete();
                 }
             }
@@ -391,19 +392,25 @@ namespace Rebus.Bus
         {
             var context = new OutgoingStepContext(logicalMessage, transactionContext, new DestinationAddresses(destinationAddresses));
 
-            await _pipelineInvoker.Invoke(context, _pipeline.SendPipeline());
+            await _pipelineInvoker.Invoke(context);
         }
 
         async Task SendTransportMessage(string destinationAddress, TransportMessage transportMessage)
         {
-            var transactionContext = AmbientTransactionContext.Current;
+            var transactionContext = GetCurrentTransactionContext(mustBelongToThisBus: true);
 
             if (transactionContext == null)
             {
-                throw new InvalidOperationException($"Attempted to send {transportMessage.GetMessageLabel()} to {destinationAddress} outside of a transaction context!");
+                using (var context = new TransactionContext())
+                {
+                    await _transport.Send(destinationAddress, transportMessage, context);
+                    await context.Complete();
+                }
             }
-
-            await _transport.Send(destinationAddress, transportMessage, transactionContext);
+            else
+            {
+                await _transport.Send(destinationAddress, transportMessage, transactionContext);
+            }
         }
 
         bool _disposing;
@@ -431,6 +438,8 @@ namespace Rebus.Bus
 
                 SetNumberOfWorkers(0);
 
+                _busLifetimeEvents.RaiseWorkersStopped();
+
                 Disposed();
             }
             finally
@@ -449,7 +458,7 @@ namespace Rebus.Bus
             }
             catch (Exception exception)
             {
-                _log.Warn("An exception occurred when stopping {0}: {1}", worker.Name, exception);
+                _log.Warn("An exception occurred when stopping {workerName}: {exception}", worker.Name, exception);
             }
         }
 
@@ -466,9 +475,24 @@ namespace Rebus.Bus
         {
             if (desiredNumberOfWorkers == GetNumberOfWorkers()) return;
 
-            _log.Info("Setting number of workers to {0}", desiredNumberOfWorkers);
-            while (desiredNumberOfWorkers > GetNumberOfWorkers()) AddWorker();
-            while (desiredNumberOfWorkers < GetNumberOfWorkers()) RemoveWorker();
+            if (desiredNumberOfWorkers > _options.MaxParallelism)
+            {
+                _log.Warn("Attempted to set number of workers to {numberOfWorkers}, but the max allowed parallelism is {maxParallelism}",
+                    desiredNumberOfWorkers, _options.MaxParallelism);
+
+                desiredNumberOfWorkers = _options.MaxParallelism;
+            }
+
+            _log.Info("Setting number of workers to {numberOfWorkers}", desiredNumberOfWorkers);
+            while (desiredNumberOfWorkers > GetNumberOfWorkers())
+            {
+                AddWorker();
+            }
+
+            if (desiredNumberOfWorkers < GetNumberOfWorkers())
+            {
+                RemoveWorkers(desiredNumberOfWorkers);
+            }
         }
 
         int GetNumberOfWorkers()
@@ -485,7 +509,7 @@ namespace Rebus.Bus
             {
                 var workerName = $"Rebus {_busId} worker {_workers.Count + 1}";
 
-                _log.Debug("Adding worker {0}", workerName);
+                _log.Debug("Adding worker {workerName}", workerName);
 
                 try
                 {
@@ -499,19 +523,50 @@ namespace Rebus.Bus
             }
         }
 
-        void RemoveWorker()
+        void RemoveWorkers(int desiredNumberOfWorkers)
         {
             lock (_workers)
             {
                 if (_workers.Count == 0) return;
 
-                using (var lastWorker = _workers.Last())
-                {
-                    _log.Debug("Removing worker {0}", lastWorker.Name);
+                var removedWorkers = new List<IWorker>();
 
+                while (_workers.Count > desiredNumberOfWorkers)
+                {
+                    var lastWorker = _workers.Last();
+                    _log.Debug("Removing worker {workerName}", lastWorker.Name);
+                    removedWorkers.Add(lastWorker);
                     _workers.Remove(lastWorker);
                 }
+
+                removedWorkers.ForEach(w => w.Stop());
+
+                // this one will block until all workers have stopped
+                removedWorkers.ForEach(w => w.Dispose());
             }
+        }
+
+        ITransactionContext GetCurrentTransactionContext(bool mustBelongToThisBus)
+        {
+            var transactionContext = AmbientTransactionContext.Current;
+
+            // if there's no context, there's no context
+            if (transactionContext == null) return null;
+
+            // if the context is not required to belong to this bus instance, just return it
+            if (!mustBelongToThisBus) return transactionContext;
+
+            // if there's a context but there's no OwningBus, just return the context (the user created it)
+            object owningBus;
+            if (!transactionContext.Items.TryGetValue("OwningBus", out owningBus))
+            {
+                return transactionContext;
+            }
+
+            // if there is an OwningBus and it is this
+            return Equals(owningBus, this) 
+                ? transactionContext 
+                : null; //< another bus created this context
         }
 
         /// <summary>

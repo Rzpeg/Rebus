@@ -24,8 +24,10 @@ namespace Rebus.Pipeline.Send
         /// </summary>
         public SendOutgoingMessageStep(ITransport transport, IRebusLoggerFactory rebusLoggerFactory)
         {
+            if (transport == null) throw new ArgumentNullException(nameof(transport));
+            if (rebusLoggerFactory == null) throw new ArgumentNullException(nameof(rebusLoggerFactory));
             _transport = transport;
-            _log = rebusLoggerFactory.GetCurrentClassLogger();
+            _log = rebusLoggerFactory.GetLogger<SendOutgoingMessageStep>();
         }
 
         /// <summary>
@@ -41,7 +43,7 @@ namespace Rebus.Pipeline.Send
 
             var hasOneOrMoreDestinations = destinationAddressesList.Any();
 
-            _log.Debug("Sending {0} -> {1}",
+            _log.Debug("Sending {messageBody} -> {queueNames}",
                 logicalMessage.Body ?? "<empty message>",
                 hasOneOrMoreDestinations ? string.Join(";", destinationAddressesList) : "<no destinations>");
 
@@ -50,7 +52,7 @@ namespace Rebus.Pipeline.Send
             await next();
         }
 
-        async Task Send(IEnumerable<string> destinationAddressesList,
+        async Task Send(List<string> destinationAddressesList,
             TransportMessage transportMessage,
             ITransactionContext currentTransactionContext)
         {

@@ -8,6 +8,7 @@ using Rebus.Activation;
 using Rebus.Bus;
 using Rebus.Config;
 using Rebus.Routing.TypeBased;
+using Rebus.Tests.Contracts;
 using Rebus.Transport.InMem;
 
 namespace Rebus.Tests.Workers
@@ -15,7 +16,7 @@ namespace Rebus.Tests.Workers
     [TestFixture]
     public class ThreadWorkerIntegrationTests : FixtureBase
     {
-        static readonly string InputQueueName = TestConfig.QueueName("test.async.input");
+        static readonly string InputQueueName = TestConfig.GetName("test.async.input");
         IBus _bus;
         BuiltinHandlerActivator _handlerActivator;
 

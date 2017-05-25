@@ -35,7 +35,7 @@ namespace Rebus.Retry.ErrorTracking
             if (rebusLoggerFactory == null) throw new ArgumentNullException(nameof(rebusLoggerFactory));
             if (asyncTaskFactory == null) throw new ArgumentNullException(nameof(asyncTaskFactory));
             _maxDeliveryAttempts = maxDeliveryAttempts;
-            _log = rebusLoggerFactory.GetCurrentClassLogger();
+            _log = rebusLoggerFactory.GetLogger<InMemErrorTracker>();
             _cleanupOldTrackedErrorsTask = asyncTaskFactory.Create(BackgroundTaskName, CleanupOldTrackedErrors, intervalSeconds: 60);
         }
 
@@ -56,7 +56,8 @@ namespace Rebus.Retry.ErrorTracking
                 id => new ErrorTracking(exception),
                 (id, tracking) => tracking.AddError(exception));
 
-            _log.Warn("Unhandled exception {0} while handling message with ID {1}: {2}", errorTracking.Errors.Count(), messageId, exception);
+            _log.Warn("Unhandled exception {errorNumber} while handling message with ID {messageId}", errorTracking.Errors.Count(), messageId);
+            //_log.Warn(exception, "Unhandled exception {errorNumber} while handling message with ID {messageId}", errorTracking.Errors.Count(), messageId);
         }
 
         /// <summary>
@@ -84,7 +85,7 @@ namespace Rebus.Retry.ErrorTracking
 
             return _trackedErrors.TryGetValue(messageId, out errorTracking)
                 ? $"{errorTracking.Errors.Count()} unhandled exceptions"
-                : "Could not get error details for the message";
+                : null;
         }
 
         /// <summary>
@@ -97,7 +98,7 @@ namespace Rebus.Retry.ErrorTracking
 
             if (!_trackedErrors.TryGetValue(messageId, out errorTracking))
             {
-                return "Could not get error details for the message";
+                return null;
             }
 
             var fullExceptionInfo = string.Join(Environment.NewLine, errorTracking.Errors.Select(e =>

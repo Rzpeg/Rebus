@@ -5,11 +5,12 @@ using Rebus.Logging;
 
 namespace Rebus.Persistence.FileSystem
 {
-    class FilesystemExclusiveLock : IDisposable
+    class FileSystemExclusiveLock : IDisposable
     {
         readonly FileStream _fileStream;
+        bool _disposed;
 
-        public FilesystemExclusiveLock(string pathToLock, ILog log)
+        public FileSystemExclusiveLock(string pathToLock, ILog log)
         {
             EnsureTargetFile(pathToLock, log);
 
@@ -23,7 +24,9 @@ namespace Rebus.Persistence.FileSystem
                 {
                     _fileStream = new FileStream(pathToLock, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
                     // Oh and there's no async version!
+#if NET45
                     _fileStream.Lock(0, 1);
+#endif
                     success = true;
                 }
                 catch (IOException)
@@ -44,7 +47,7 @@ namespace Rebus.Persistence.FileSystem
                 var directoryName = Path.GetDirectoryName(pathToLock);
                 if (!Directory.Exists(directoryName))
                 {
-                    log.Info("Directory {0} does not exist - creating it now", pathToLock);
+                    log.Info("Directory {directoryPath} does not exist - creating it now", pathToLock);
                     Directory.CreateDirectory(directoryName);
                 }
             }
@@ -67,7 +70,19 @@ namespace Rebus.Persistence.FileSystem
 
         public void Dispose()
         {
-            _fileStream.Unlock(0,1);
+            if (_disposed) return;
+
+            try
+            {
+#if NET45
+                _fileStream.Unlock(0, 1);
+#endif
+                _fileStream.Dispose();
+            }
+            finally
+            {
+                _disposed = true;
+            }
         }
     }
 }

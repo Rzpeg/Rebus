@@ -30,7 +30,7 @@ namespace Rebus.DataBus.FileSystem
             if (directoryPath == null) throw new ArgumentNullException(nameof(directoryPath));
             if (rebusLoggerFactory == null) throw new ArgumentNullException(nameof(rebusLoggerFactory));
             _directoryPath = directoryPath;
-            _log = rebusLoggerFactory.GetCurrentClassLogger();
+            _log = rebusLoggerFactory.GetLogger<FileSystemDataBusStorage>();
         }
 
         /// <summary>
@@ -40,11 +40,11 @@ namespace Rebus.DataBus.FileSystem
         {
             if (!Directory.Exists(_directoryPath))
             {
-                _log.Info("Creating directory {0}", _directoryPath);
+                _log.Info("Creating directory {directoryPath}", _directoryPath);
                 Directory.CreateDirectory(_directoryPath);
             }
 
-            _log.Info("Checking that the current process has read/write access to directory {0}", _directoryPath);
+            _log.Info("Checking that the current process has read/write access to directory {directoryPath}", _directoryPath);
             EnsureDirectoryIsWritable();
         }
 
@@ -105,15 +105,18 @@ namespace Rebus.DataBus.FileSystem
 
             try
             {
-                using (var reader = new StreamReader(metadataFilePath, Encoding.UTF8))
+                using (var fileStream = File.OpenRead(metadataFilePath))
                 {
-                    var jsonText = await reader.ReadToEndAsync();
-                    var metadata = _dictionarySerializer.DeserializeFromString(jsonText);
+                    using (var reader = new StreamReader(fileStream, Encoding.UTF8))
+                    {
+                        var jsonText = await reader.ReadToEndAsync();
+                        var metadata = _dictionarySerializer.DeserializeFromString(jsonText);
 
-                    var fileInfo = new FileInfo(filePath);
-                    metadata[MetadataKeys.Length] = fileInfo.Length.ToString();
+                        var fileInfo = new FileInfo(filePath);
+                        metadata[MetadataKeys.Length] = fileInfo.Length.ToString();
 
-                    return metadata;
+                        return metadata;
+                    }
                 }
             }
             catch (Exception exception)

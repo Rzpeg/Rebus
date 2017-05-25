@@ -9,7 +9,9 @@ using Rebus.Config;
 using Rebus.Handlers;
 using Rebus.Messages;
 using Rebus.Sagas;
+using Rebus.Tests.Contracts;
 using Rebus.Transport.InMem;
+#pragma warning disable 1998
 
 namespace Rebus.Tests.Integration
 {

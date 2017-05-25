@@ -1,6 +1,7 @@
 ﻿using System;
 using NUnit.Framework;
 using Rebus.Encryption;
+using Rebus.Tests.Contracts;
 
 namespace Rebus.Tests.Encryption
 {
@@ -12,7 +13,12 @@ namespace Rebus.Tests.Encryption
         {
             var argumentException = Assert.Throws<ArgumentException>(() =>
             {
+#if NET45
                 new RijndaelEncryptor("not a valid key");
+#elif NETSTANDARD1_6
+                new AesEncryptor("not a valid key");
+#endif
+
             });
 
             Console.WriteLine(argumentException);

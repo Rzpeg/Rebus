@@ -2,7 +2,9 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+#if NET45
 using System.Runtime.Serialization;
+#endif
 
 namespace Rebus.Injection
 {
@@ -90,11 +92,16 @@ namespace Rebus.Injection
         /// </summary>
         public bool Has<TService>(bool primary = true)
         {
+            return ResolverHaveRegistrationFor<TService>(primary, _resolvers);
+        }
+
+        static bool ResolverHaveRegistrationFor<TService>(bool primary, Dictionary<Type, Handler> resolvers)
+        {
             var key = typeof(TService);
 
-            if (!_resolvers.ContainsKey(key)) return false;
+            if (!resolvers.ContainsKey(key)) return false;
 
-            var handler = _resolvers[key];
+            var handler = resolvers[key];
 
             if (handler.PrimaryResolver != null) return true;
 
@@ -112,8 +119,9 @@ namespace Rebus.Injection
             {
                 if (handler.PrimaryResolver != null)
                 {
-                    throw new InvalidOperationException(string.Format("Attempted to register {0}, but a primary registration already exists: {1}",
-                        resolver, handler.PrimaryResolver));
+                    var message = $"Attempted to register {resolver}, but a primary registration already exists: {handler.PrimaryResolver}";
+
+                    throw new InvalidOperationException(message);
                 }
             }
 
@@ -161,9 +169,12 @@ namespace Rebus.Injection
 
             public override string ToString()
             {
+                var role = IsDecorator ? "decorator ->" : "primary ->";
+                var type = typeof(TService);
+
                 return !string.IsNullOrWhiteSpace(_description)
-                    ? string.Format("{0} {1} ({2})", IsDecorator ? "decorator ->" : "primary ->", typeof(TService), _description)
-                    : string.Format("{0} {1}", IsDecorator ? "decorator ->" : "primary ->", typeof(TService));
+                    ? $"{role} {type} ({_description})"
+                    : $"{role} {type}";
             }
         }
 
@@ -181,6 +192,11 @@ namespace Rebus.Injection
                 _serviceTypeRequested = serviceTypeRequested;
             }
 
+            public bool Has<TService>(bool primary = true)
+            {
+                return ResolverHaveRegistrationFor<TService>(primary, _resolvers);
+            }
+
             public TService Get<TService>()
             {
                 var serviceType = typeof(TService);
@@ -194,7 +210,7 @@ namespace Rebus.Injection
 
                 if (!_resolvers.ContainsKey(serviceType))
                 {
-                    throw new ResolutionException("Could not find resolver for {0}", serviceType);
+                    throw new ResolutionException("Could not find resolver for {serviceType}");
                 }
 
                 if (!_decoratorDepth.ContainsKey(serviceType))
@@ -232,8 +248,7 @@ namespace Rebus.Injection
                 }
                 catch (Exception exception)
                 {
-                    throw new ResolutionException(exception, "Could not resolve {0} with decorator depth {1} - registrations: {2}",
-                        serviceType, depth, string.Join("; ", handlerForThisType));
+                    throw new ResolutionException(exception, $"Could not resolve {serviceType} with decorator depth {depth} - registrations: {string.Join("; ", handlerForThisType)}");
                 }
                 finally
                 {
@@ -262,30 +277,38 @@ namespace Rebus.Injection
         /// Gets all instances resolved within this resolution context at this time.
         /// </summary>
         IEnumerable TrackedInstances { get; }
+
+        /// <summary>
+        /// Gets whether there exists a primary registration for the <typeparamref name="TService"/> type
+        /// </summary>
+        bool Has<TService>(bool primary = true);
     }
 
     /// <summary>
     /// Exceptions that is thrown when something goes wrong while working with the injectionist
     /// </summary>
+#if NET45
     [Serializable]
+#endif
     public class ResolutionException : Exception
     {
         /// <summary>
         /// Constructs the exception
         /// </summary>
-        public ResolutionException(string message, params object[] objs)
-            : base(string.Format(message, objs))
+        public ResolutionException(string message)
+            : base(message)
         {
         }
 
         /// <summary>
         /// Constructs the exception
         /// </summary>
-        public ResolutionException(Exception innerException, string message, params object[] objs)
-            : base(string.Format(message, objs), innerException)
+        public ResolutionException(Exception innerException, string message)
+            : base(message, innerException)
         {
         }
 
+#if NET45
         /// <summary>
         /// Constructs the exception
         /// </summary>
@@ -293,6 +316,7 @@ namespace Rebus.Injection
             : base(info, context)
         {
         }
+#endif
     }
 
     /// <summary>

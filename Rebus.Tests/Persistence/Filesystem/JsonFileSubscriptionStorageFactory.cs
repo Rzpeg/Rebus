@@ -2,14 +2,15 @@ using System;
 using System.IO;
 using Rebus.Persistence.FileSystem;
 using Rebus.Subscriptions;
+using Rebus.Tests.Contracts;
 using Rebus.Tests.Contracts.Subscriptions;
 
 namespace Rebus.Tests.Persistence.Filesystem
 {
     public class JsonFileSubscriptionStorageFactory : ISubscriptionStorageFactory
     {
-        readonly string _xmlDataFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "subscriptions.json");
-        
+        readonly string _xmlDataFilePath = Path.Combine(TestConfig.DirectoryPath(), "subscriptions.json");
+
         public ISubscriptionStorage Create()
         {
             CleanupOldDataFile();

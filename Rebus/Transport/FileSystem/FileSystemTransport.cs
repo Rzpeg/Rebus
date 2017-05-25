@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -7,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Rebus.Bus;
+using Rebus.Exceptions;
 using Rebus.Messages;
 using Rebus.Time;
 
@@ -17,7 +19,7 @@ namespace Rebus.Transport.FileSystem
     /// <summary>
     /// Transport implementation that uses the file system to send/receive messages.
     /// </summary>
-    public class FileSystemTransport : ITransport, IInitializable
+    public class FileSystemTransport : ITransport, IInitializable, ITransportInspector
     {
         static readonly JsonSerializerSettings SuperSecretSerializerSettings = new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.None };
         static readonly Encoding FavoriteEncoding = Encoding.UTF8;
@@ -82,7 +84,7 @@ namespace Rebus.Transport.FileSystem
         /// Receives the next message from the logical input queue by loading the next file from the corresponding directory,
         /// deserializing it, deleting it when the transaction is committed.
         /// </summary>
-        public async Task<TransportMessage> Receive(ITransactionContext context, CancellationToken cancellationToken = default(CancellationToken))
+        public async Task<TransportMessage> Receive(ITransactionContext context, CancellationToken cancellationToken)
         {
             string fullPath = null;
             try
@@ -157,7 +159,7 @@ namespace Rebus.Transport.FileSystem
 
         static async Task<string> ReadAllText(string fileName)
         {
-            using(var stream = File.OpenRead(fileName))
+            using (var stream = File.OpenRead(fileName))
             using (var reader = new StreamReader(stream, FavoriteEncoding))
             {
                 return await reader.ReadToEndAsync();
@@ -169,10 +171,7 @@ namespace Rebus.Transport.FileSystem
         /// For other transports, this is a global "address", but for this transport the address space is confined to the base directory.
         /// Therefore, the global address is the same as the input queue name.
         /// </summary>
-        public string Address
-        {
-            get { return _inputQueue; }
-        }
+        public string Address => _inputQueue;
 
         /// <summary>
         /// Ensures that the "queue" is initialized (i.e. that the corresponding subdirectory exists).
@@ -184,20 +183,40 @@ namespace Rebus.Transport.FileSystem
             EnsureQueueInitialized(_inputQueue);
         }
 
+        /// <summary>
+        /// Gets the number of messages waiting in this "queue"
+        /// </summary>
+        public async Task<Dictionary<string, object>> GetProperties(CancellationToken cancellationToken)
+        {
+            var count = GetCount(cancellationToken);
+
+            return new Dictionary<string, object>
+            {
+                {TransportInspectorPropertyKeys.QueueLength, count.ToString()}
+            };
+        }
+
+        int GetCount(CancellationToken cancellationToken)
+        {
+            var count = 0;
+            var directoryPath = GetDirectoryForQueueNamed(_inputQueue);
+
+            using (var enumerator = Directory.EnumerateFiles(directoryPath, "*.rebusmessage.json").GetEnumerator())
+            {
+                while (enumerator.MoveNext())
+                {
+                    count++;
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+            }
+
+            return count;
+        }
+
         string GetNextFileName()
         {
             return
                 $"{DateTime.UtcNow:yyyy_MM_dd_HH_mm_ss}_{Interlocked.Increment(ref _incrementingCounter):0000000}_{Guid.NewGuid()}.rebusmessage.json";
-        }
-
-        string Serialize(TransportMessage message)
-        {
-            return JsonConvert.SerializeObject(message, SuperSecretSerializerSettings);
-        }
-
-        TransportMessage Deserialize(string serialiedMessage)
-        {
-            return JsonConvert.DeserializeObject<TransportMessage>(serialiedMessage, SuperSecretSerializerSettings);
         }
 
         void EnsureQueueNameIsValid(string queueName)
@@ -234,8 +253,8 @@ namespace Rebus.Transport.FileSystem
 
             if (caughtException != null && !Directory.Exists(directory))
             {
-                throw new ApplicationException(
-                    $"Could not initialize directory '{directory}' for queue named '{queueName}'", caughtException);
+                throw new RebusApplicationException(
+                    caughtException, $"Could not initialize directory '{directory}' for queue named '{queueName}'");
             }
 
             // if an exception occurred but the directory exists now, it must have been a race... we're good
@@ -245,6 +264,16 @@ namespace Rebus.Transport.FileSystem
         string GetDirectoryForQueueNamed(string queueName)
         {
             return Path.Combine(_baseDirectory, queueName);
+        }
+
+        static string Serialize(TransportMessage message)
+        {
+            return JsonConvert.SerializeObject(message, SuperSecretSerializerSettings);
+        }
+
+        static TransportMessage Deserialize(string serialiedMessage)
+        {
+            return JsonConvert.DeserializeObject<TransportMessage>(serialiedMessage, SuperSecretSerializerSettings);
         }
     }
 }

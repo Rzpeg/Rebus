@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Rebus.Bus;
 using Rebus.Config;
+using Rebus.Exceptions;
 using Rebus.Extensions;
 using Rebus.Logging;
 using Rebus.Messages;
@@ -46,7 +47,7 @@ This is done by checking if the incoming message has a '" + Headers.DeferredUnti
             _timeoutManager = timeoutManager;
             _transport = transport;
             _options = options;
-            _log = rebusLoggerFactory.GetCurrentClassLogger();
+            _log = rebusLoggerFactory.GetLogger<HandleDeferredMessagesStep>();
 
             var dueTimeoutsPollIntervalSeconds = (int)options.DueTimeoutsPollInterval.TotalSeconds;
             var intervalToUse = dueTimeoutsPollIntervalSeconds >= 1 ? dueTimeoutsPollIntervalSeconds : 1;
@@ -64,7 +65,7 @@ This is done by checking if the incoming message has a '" + Headers.DeferredUnti
 
             if (UsingExternalTimeoutManager)
             {
-                _log.Info("Using external timeout manager with this address: '{0}'", _options.ExternalTimeoutManagerAddressOrNull);
+                _log.Info("Using external timeout manager with this address: {queueName}", _options.ExternalTimeoutManagerAddressOrNull);
             }
             else
             {
@@ -83,19 +84,21 @@ This is done by checking if the incoming message has a '" + Headers.DeferredUnti
                     var transportMessage = dueMessage.ToTransportMessage();
                     var returnAddress = transportMessage.Headers[Headers.DeferredRecipient];
 
-                    _log.Debug("Sending due message {0} to {1}",
-                        transportMessage.Headers[Headers.MessageId],
+                    _log.Debug("Sending due message {messageLabel} to {queueName}",
+                        transportMessage.GetMessageLabel(),
                         returnAddress);
 
-                    using (var context = new DefaultTransactionContext())
+                    using (var context = new TransactionContext())
                     {
                         await _transport.Send(returnAddress, transportMessage, context);
 
                         await context.Complete();
                     }
 
-                    dueMessage.MarkAsCompleted();
+                    await dueMessage.MarkAsCompleted();
                 }
+
+                await result.Complete();
             }
         }
 
@@ -120,7 +123,7 @@ This is done by checking if the incoming message has a '" + Headers.DeferredUnti
             {
                 if (!headers.ContainsKey(Headers.DeferredRecipient))
                 {
-                    throw new ApplicationException(
+                    throw new RebusApplicationException(
                         $"Received message {headers[Headers.MessageId]} with the '{Headers.DeferredUntil}' header" +
                         $" set to '{headers[Headers.DeferredUntil]}', but the message had no" +
                         $" '{Headers.DeferredRecipient}' header!");
@@ -143,7 +146,7 @@ This is done by checking if the incoming message has a '" + Headers.DeferredUnti
         {
             var timeoutManagerAddress = _options.ExternalTimeoutManagerAddressOrNull;
 
-            _log.Info("Forwarding deferred message {0} to external timeout manager '{1}'",
+            _log.Debug("Forwarding deferred message {messageLabel} to external timeout manager '{queueName}'",
                 transportMessage.GetMessageLabel(), timeoutManagerAddress);
 
             await _transport.Send(timeoutManagerAddress, transportMessage, transactionContext);
@@ -153,7 +156,7 @@ This is done by checking if the incoming message has a '" + Headers.DeferredUnti
         {
             var approximateDueTime = GetTimeToBeDelivered(deferredUntil);
 
-            _log.Info("Deferring message {0} until {1}", headers[Headers.MessageId], approximateDueTime);
+            _log.Debug("Deferring message {messageLabel} until {dueTime}", transportMessage.GetMessageLabel(), approximateDueTime);
 
             headers.Remove(Headers.DeferredUntil);
 

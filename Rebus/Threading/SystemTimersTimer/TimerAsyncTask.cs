@@ -1,6 +1,10 @@
 ﻿using System;
-using System.Threading.Tasks;
+#if NET45
 using System.Timers;
+#elif NETSTANDARD1_6
+using System.Threading;
+#endif
+using System.Threading.Tasks;
 using Rebus.Logging;
 
 namespace Rebus.Threading.SystemTimersTimer
@@ -59,14 +63,21 @@ namespace Rebus.Threading.SystemTimersTimer
         /// </summary>
         public void Start()
         {
-            LogStartStop("Starting periodic task '{0}' with interval {1}", _description, Interval);
-
+            LogStartStop("Starting periodic task {taskDescription} with interval {timerInterval}", _description, Interval);
+#if NET45
             _timer = new Timer(Interval.TotalMilliseconds);
             _timer.Elapsed += (o, ea) => Tick();
             _timer.Start();
+#elif NETSTANDARD1_6
+            _timer = new Timer(Tick, null, Interval, Interval);
+#endif
         }
 
+#if NET45
         async void Tick()
+#elif NETSTANDARD1_6
+        async void Tick(object state)
+#endif
         {
             if (_executingTick) return;
 
@@ -83,7 +94,7 @@ namespace Rebus.Threading.SystemTimersTimer
             }
             catch (Exception exception)
             {
-                _log.Warn("Exception in periodic task '{0}': {1}", _description, exception);
+                _log.Warn("Exception in periodic task {taskDescription}: {exception}", _description, exception);
             }
             finally
             {
@@ -102,7 +113,7 @@ namespace Rebus.Threading.SystemTimersTimer
             {
                 if (_timer == null) return;
 
-                LogStartStop("Stopping periodic task '{0}'", _description);
+                LogStartStop("Stopping periodic task {taskDescription}", _description);
 
                 _timer.Dispose();
             }
@@ -123,6 +134,5 @@ namespace Rebus.Threading.SystemTimersTimer
                 _log.Info(message, objs);
             }
         }
-
     }
 }

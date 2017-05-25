@@ -16,27 +16,33 @@ namespace Rebus.Logging
         /// </summary>
         public class LogStatement
         {
-            internal LogStatement(LogLevel level, string text, object[] args)
+            internal LogStatement(LogLevel level, string text, object[] args, Type type)
             {
                 Level = level;
                 Args = args;
+                Type = type;
                 Text = text;
             }
 
             /// <summary>
             /// The level of this log statement
             /// </summary>
-            public LogLevel Level { get; private set; }
+            public LogLevel Level { get; }
             
             /// <summary>
             /// The text (possibly inclusing formatting placeholders) of this log statement
             /// </summary>
-            public string Text { get; private set; }
+            public string Text { get; }
             
             /// <summary>
             /// The values to use for string interpolation
             /// </summary>
-            public object[] Args { get; private set; }
+            public object[] Args { get; }
+
+            /// <summary>
+            /// The type to which this particular logger belongs
+            /// </summary>
+            public Type Type { get; }
         }
 
         static readonly ConcurrentDictionary<Type, ILog> Loggers = new ConcurrentDictionary<Type, ILog>();
@@ -140,8 +146,6 @@ namespace Rebus.Logging
                                           : "{1} {2} ({3}): {4}";
             }
 
-            #region ILog Members
-
             public void Debug(string message, params object[] objs)
             {
                 Log(LogLevel.Debug, message, _loggingColors.Debug, objs);
@@ -157,17 +161,20 @@ namespace Rebus.Logging
                 Log(LogLevel.Warn, message, _loggingColors.Warn, objs);
             }
 
+            public void Warn(Exception exception, string message, params object[] objs)
+            {
+                Log(LogLevel.Warn, _factory.RenderString(message, objs) + Environment.NewLine + exception, _loggingColors.Error);
+            }
+
             public void Error(Exception exception, string message, params object[] objs)
             {
-                Log(LogLevel.Error, string.Format(message, objs) + Environment.NewLine + exception, _loggingColors.Error);
+                Log(LogLevel.Error, _factory.RenderString(message, objs) + Environment.NewLine + exception, _loggingColors.Error);
             }
 
             public void Error(string message, params object[] objs)
             {
                 Log(LogLevel.Error, message, _loggingColors.Error, objs);
             }
-
-            #endregion
 
             void Log(LogLevel level, string message, ColorSetting colorSetting, params object[] objs)
             {
@@ -204,7 +211,7 @@ namespace Rebus.Logging
             void Write(LogLevel level, string message, object[] objs)
             {
                 if ((int)level < (int)_factory.MinLevel) return;
-                if (_factory.AbortedByFilter(new LogStatement(level, message, objs))) return;
+                if (_factory.AbortedByFilter(new LogStatement(level, message, objs, _type))) return;
 
                 var levelString = LevelString(level);
 
@@ -212,7 +219,7 @@ namespace Rebus.Logging
                 var typeName = _type.FullName;
                 try
                 {
-                    var renderedMessage = string.Format(message, objs);
+                    var renderedMessage = _factory.RenderString(message, objs);
                     var timeFormat = DateTime.Now.ToString("yyyy-MM-dd hh:mm:ss");
 
                     // ReSharper disable EmptyGeneralCatchClause
@@ -233,7 +240,7 @@ namespace Rebus.Logging
                 }
                 catch
                 {
-                    Warn("Could not render output string: '{0}' with args: {1}", message, string.Join(", ", objs));
+                    Warn("Could not render {message} with args {args}", message, objs);
                 }
             }
 

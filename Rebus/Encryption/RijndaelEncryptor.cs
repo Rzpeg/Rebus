@@ -1,4 +1,5 @@
-﻿using System;
+﻿#if NET45
+using System;
 using System.IO;
 using System.Security.Cryptography;
 
@@ -22,10 +23,10 @@ namespace Rebus.Encryption
         /// <param name="key"></param>
         public RijndaelEncryptor(string key)
         {
-            _key = Convert.FromBase64String(key);
-
             try
             {
+                _key = Convert.FromBase64String(key);
+
                 using (var rijndael = new RijndaelManaged())
                 {
                     rijndael.Key = _key;
@@ -101,3 +102,4 @@ I promise that the suggested key has been generated this instant - if you don't 
         }
     }
 }
+#endif

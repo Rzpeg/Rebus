@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using NUnit.Framework;
 using Rebus.Activation;
 using Rebus.Handlers;
+using Rebus.Tests.Contracts;
 using Rebus.Transport;
 
 namespace Rebus.Tests.Activation
@@ -19,7 +20,8 @@ namespace Rebus.Tests.Activation
 
         protected override void TearDown()
         {
-            AmbientTransactionContext.Current = null;
+            AmbientTransactionContext.SetCurrent(null);
+
             _activator.Dispose();
         }
 
@@ -28,9 +30,12 @@ namespace Rebus.Tests.Activation
         {
             _activator.Register(() => new SomeHandler());
 
-            var handlers = _activator.GetHandlers("hej med dig", new DefaultTransactionContext()).Result;
+            using (var scope = new RebusTransactionScope())
+            {
+                var handlers = _activator.GetHandlers("hej med dig", scope.TransactionContext).Result;
 
-            Assert.That(handlers.Single(), Is.TypeOf<SomeHandler>());
+                Assert.That(handlers.Single(), Is.TypeOf<SomeHandler>());
+            }
         }
 
         [Test]
@@ -38,11 +43,9 @@ namespace Rebus.Tests.Activation
         {
             _activator.Register(context => new SomeHandler());
 
-            using (var transactionContext = new DefaultTransactionContext())
+            using (var scope = new RebusTransactionScope())
             {
-                AmbientTransactionContext.Current = transactionContext;
-
-                var handlers = _activator.GetHandlers("hej med dig", transactionContext).Result;
+                var handlers = _activator.GetHandlers("hej med dig", scope.TransactionContext).Result;
 
                 Assert.That(handlers.Single(), Is.TypeOf<SomeHandler>());
             }
@@ -53,11 +56,9 @@ namespace Rebus.Tests.Activation
         {
             _activator.Register((bus, context) => new SomeHandler());
 
-            using (var transactionContext = new DefaultTransactionContext())
+            using (var scope = new RebusTransactionScope())
             {
-                AmbientTransactionContext.Current = transactionContext;
-
-                var handlers = _activator.GetHandlers("hej med dig", transactionContext).Result;
+                var handlers = _activator.GetHandlers("hej med dig", scope.TransactionContext).Result;
 
                 Assert.That(handlers.Single(), Is.TypeOf<SomeHandler>());
             }

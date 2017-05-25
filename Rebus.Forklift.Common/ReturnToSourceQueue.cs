@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Rebus.Bus;
 using Rebus.Messages;
 using Rebus.Transport;
@@ -111,15 +112,15 @@ namespace Rebus.Forklift.Common
 
             while (true)
             {
-                using (var transactionContext = new DefaultTransactionContext())
+                using (var transactionContext = new DefaultTransactionContextScope())
                 {
-                    var transportMessage = _transport.Receive(transactionContext).Result;
+                    var transportMessage = _transport.Receive(AmbientTransactionContext.Current, new CancellationTokenSource().Token).Result;
 
                     if (transportMessage == null) break;
 
                     try
                     {
-                        HandleMessage(transportMessage, transactionContext);
+                        HandleMessage(transportMessage, AmbientTransactionContext.Current);
 
                         transactionContext.Complete().Wait();
                     }

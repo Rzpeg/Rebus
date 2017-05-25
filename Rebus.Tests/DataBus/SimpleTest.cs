@@ -6,11 +6,13 @@ using System.Threading.Tasks;
 using NUnit.Framework;
 using Rebus.Activation;
 using Rebus.Bus;
+using Rebus.Compression;
 using Rebus.Config;
 using Rebus.DataBus;
-using Rebus.DataBus.FileSystem;
 using Rebus.DataBus.InMem;
 using Rebus.Routing.TypeBased;
+using Rebus.Tests.Contracts;
+using Rebus.Tests.Contracts.Extensions;
 using Rebus.Tests.Extensions;
 using Rebus.Transport.InMem;
 
@@ -43,6 +45,7 @@ namespace Rebus.Tests.DataBus
                 .Options(o =>
                 {
                     o.EnableDataBus()
+                        .UseCompression(DataCompressionMode.Always)
                         .StoreInMemory(_inMemDataStore);
                 })
                 .Start();
@@ -81,7 +84,7 @@ namespace Rebus.Tests.DataBus
             {
                 var optionalMetadata = new Dictionary<string, string>
                 {
-                    {"username", Thread.CurrentPrincipal.Identity.Name }
+                    {"username", "ExampleUserName" }
                 };
                 var attachment = await _senderBus.Advanced.DataBus.CreateAttachment(source, optionalMetadata);
 

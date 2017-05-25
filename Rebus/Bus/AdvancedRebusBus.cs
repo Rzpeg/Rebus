@@ -8,6 +8,7 @@ using Rebus.Messages;
 using Rebus.Pipeline;
 using Rebus.Time;
 using Rebus.Transport;
+// ReSharper disable ArgumentsStyleLiteral
 
 namespace Rebus.Bus
 {
@@ -33,10 +34,10 @@ namespace Rebus.Bus
 
             public ITransportMessageApi TransportMessage => new TransportMessageApi(_rebusBus);
 
-            public IDataBus DataBus => _rebusBus.DataBus;
-        }
+            public IDataBus DataBus => _rebusBus._dataBus;
 
-        internal IDataBus DataBus => _dataBus;
+            public ISyncBus SyncBus => new SyncApi(_rebusBus);
+        }
 
         class TransportMessageApi : ITransportMessageApi
         {
@@ -64,9 +65,9 @@ namespace Rebus.Bus
                 await _rebusBus.SendTransportMessage(timeoutManagerAddress, transportMessage);
             }
 
-            static TransportMessage GetCloneOfCurrentTransportMessage(Dictionary<string, string> optionalAdditionalHeaders)
+            TransportMessage GetCloneOfCurrentTransportMessage(Dictionary<string, string> optionalAdditionalHeaders)
             {
-                var transactionContext = AmbientTransactionContext.Current;
+                var transactionContext = _rebusBus.GetCurrentTransactionContext(mustBelongToThisBus: false);
 
                 if (transactionContext == null)
                 {
@@ -74,15 +75,17 @@ namespace Rebus.Bus
                         "Attempted to perform operation on the current transport message, but there was no transaction context and therefore no 'current transport message' to do anything with! This call must be made from within a message handler... if you're actually doing that, you're probably experiencing this error because you're executing this operation on an independent thread somehow...");
                 }
 
-                var currentTransportMessage = transactionContext
+                var originalTransportMessage = transactionContext
                     .GetOrThrow<IncomingStepContext>(StepContext.StepContextKey)
-                    .Load<TransportMessage>();
+                    .Load<OriginalTransportMessage>();
 
-                if (currentTransportMessage == null)
+                if (originalTransportMessage == null)
                 {
                     throw new InvalidOperationException(
                         "Attempted to perform operation on the current transport message, but no transport message could be found in the context.... this is odd because the entire receive pipeline will only get called when there is a transport message, so maybe it has somehow been removed?");
                 }
+
+                var currentTransportMessage = originalTransportMessage.TransportMessage;
 
                 var headers = optionalAdditionalHeaders != null
                     ? currentTransportMessage.Headers.MergedWith(optionalAdditionalHeaders)
@@ -92,6 +95,61 @@ namespace Rebus.Bus
                 var clone = new TransportMessage(headers, body);
 
                 return clone;
+            }
+        }
+
+        class SyncApi : ISyncBus
+        {
+            readonly RebusBus _rebusBus;
+
+            public SyncApi(RebusBus rebusBus)
+            {
+                _rebusBus = rebusBus;
+            }
+
+            public void SendLocal(object commandMessage, Dictionary<string, string> optionalHeaders = null)
+            {
+                AsyncHelpers.RunSync(() => _rebusBus.SendLocal(commandMessage, optionalHeaders));
+            }
+
+            public void Send(object commandMessage, Dictionary<string, string> optionalHeaders = null)
+            {
+                AsyncHelpers.RunSync(() => _rebusBus.Send(commandMessage, optionalHeaders));
+            }
+
+            public void Reply(object replyMessage, Dictionary<string, string> optionalHeaders = null)
+            {
+                AsyncHelpers.RunSync(() => _rebusBus.Reply(replyMessage, optionalHeaders));
+            }
+
+            public void Defer(TimeSpan delay, object message, Dictionary<string, string> optionalHeaders = null)
+            {
+                AsyncHelpers.RunSync(() => _rebusBus.Defer(delay, message, optionalHeaders));
+            }
+
+            public void Subscribe<TEvent>()
+            {
+                AsyncHelpers.RunSync(() => _rebusBus.Subscribe<TEvent>());
+            }
+
+            public void Subscribe(Type eventType)
+            {
+                AsyncHelpers.RunSync(() => _rebusBus.Subscribe(eventType));
+            }
+
+            public void Unsubscribe<TEvent>()
+            {
+                AsyncHelpers.RunSync(() => _rebusBus.Unsubscribe<TEvent>());
+            }
+
+            public void Unsubscribe(Type eventType)
+            {
+                AsyncHelpers.RunSync(() => _rebusBus.Unsubscribe(eventType));
+            }
+
+            public void Publish(object eventMessage, Dictionary<string, string> optionalHeaders = null)
+            {
+                AsyncHelpers.RunSync(() => _rebusBus.Publish(eventMessage, optionalHeaders));
             }
         }
 
